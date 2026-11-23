@@ -29,12 +29,12 @@ Plataforma para agências de marketing e criadores: **conteúdo com IA (Claude)*
 | Geração em Lote, Configurações (marca, equipe) | 🔜 páginas provisórias |
 
 ## ✅ Publicação: o que já está feito e o que falta
-**Já feito (23/11/2026):** projeto Supabase `agencia-x` (ref `ibywxlqjmilzdevllntp`) com as 20 tabelas, RLS ligado em todas (bloqueia a API pública; o app acessa direto pelo servidor) e o bucket privado `assets` para os arquivos do portal.
+**Já feito (23/11/2026):** projeto Supabase `agencia-x` em **São Paulo** (ref `rjriyuuiydbjkfwouspd`) com as 20 tabelas, RLS ligado em todas (bloqueia a API pública; o app acessa direto pelo servidor) e o bucket privado `assets` para os arquivos do portal.
 
 **Falta você pegar (são segredos, só você vê no painel):**
 1. **Chave do Claude:** console.anthropic.com → API Keys → `ANTHROPIC_API_KEY`.
 2. **Conexão do banco:** Supabase → botão *Connect* → **Transaction pooler** (porta 6543) → copie a URI, troque `[YOUR-PASSWORD]` pela senha do banco e acrescente no final `?pgbouncer=true&connection_limit=1` → `DATABASE_URL`.
-3. **Arquivos:** Supabase → Project Settings → API Keys → `service_role` → `SUPABASE_SERVICE_ROLE_KEY`. E `SUPABASE_URL=https://ibywxlqjmilzdevllntp.supabase.co`.
+3. **Arquivos:** Supabase → Project Settings → API Keys → `service_role` → `SUPABASE_SERVICE_ROLE_KEY`. E `SUPABASE_URL=https://rjriyuuiydbjkfwouspd.supabase.co`.
 4. **`AUTH_SECRET`:** qualquer texto longo e aleatório (ex.: gere em 1password.com/password-generator, 40+ caracteres).
 
 **Publicar:** vercel.com → *Add New → Project* → importe `botsol` → **Root Directory = `agencia-x`** → cole as variáveis acima → Deploy. Depois, entre em `/cadastro` para criar sua agência (o banco de produção começa vazio, sem os logins de demonstração).
