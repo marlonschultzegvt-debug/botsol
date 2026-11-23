@@ -49,9 +49,9 @@ export function CalendarBoard({
   const [pending, start] = useTransition();
   // Horários dependem do fuso do navegador: a grade só renderiza no cliente (evita erro de hidratação).
   const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  useEffect(() => { setMounted(true); }, []);
 
-  useEffect(() => setItems(pieces), [pieces]);
+  useEffect(() => { setItems(pieces); }, [pieces]);
 
   // ?open=<id> abre o editor direto (link vindo da ficha do cliente).
   useEffect(() => {

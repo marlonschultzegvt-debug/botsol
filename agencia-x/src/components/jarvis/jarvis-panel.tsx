@@ -1,13 +1,15 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Maximize2, X } from "lucide-react";
+import { Ear, Maximize2, X } from "lucide-react";
 import { JarvisChat } from "./jarvis-chat";
+import { useJarvisCtx } from "./jarvis-context";
 import { JarvisOrb } from "./jarvis-orb";
 import { cn } from "@/lib/utils";
 
 /** Botão flutuante + painel lateral do assistente, disponível em todas as telas. */
 export function JarvisPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  const j = useJarvisCtx();
   // Na página /jarvis o chat já ocupa a tela.
   if (usePathname() === "/jarvis") return null;
 
@@ -17,9 +19,14 @@ export function JarvisPanel({ open, onOpenChange }: { open: boolean; onOpenChang
         <button
           onClick={() => onOpenChange(true)}
           className="fixed bottom-5 right-5 z-40 rounded-full transition hover:scale-105"
-          aria-label="Abrir assistente"
+          aria-label={j.handsFree ? "Abrir assistente (mãos-livres ligado)" : "Abrir assistente"}
         >
-          <JarvisOrb size={64} />
+          <JarvisOrb size={64} state={j.armed ? "listening" : j.state} />
+          {j.handsFree && (
+            <span className="absolute -left-1 -top-1 grid h-6 w-6 place-items-center rounded-full border border-primary/60 bg-background text-primary">
+              <Ear className="h-3.5 w-3.5" />
+            </span>
+          )}
         </button>
       )}
       <div

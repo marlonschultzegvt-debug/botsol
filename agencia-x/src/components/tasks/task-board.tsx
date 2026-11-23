@@ -38,7 +38,7 @@ export function TaskBoard({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
-  useEffect(() => setItems(tasks), [tasks]);
+  useEffect(() => { setItems(tasks); }, [tasks]);
 
   const filtered = useMemo(
     () =>

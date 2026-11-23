@@ -1,29 +1,32 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Mic, Send, Square, Volume2, VolumeX, RotateCcw } from "lucide-react";
+import { Ear, EarOff, Mic, Send, Square, Volume2, VolumeX, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { JarvisOrb } from "./jarvis-orb";
-import { useJarvis } from "./use-jarvis";
+import { useJarvisCtx } from "./jarvis-context";
 import { ASSISTANT_NAME, cn } from "@/lib/utils";
 
 const SUGGESTIONS = [
   "Resumo do dia: o que precisa da minha atenção?",
   "Quais clientes estão com pagamento atrasado?",
-  "Me dá 5 ideias de Reels para a Sorriso Prime",
-  "Como está a receita comparada à meta?",
+  "Me dá 5 ideias de Reels para uma clínica odontológica",
+  "Quais ganchos funcionam para loja de roupas?",
 ];
 
 const STATE_LABEL = { idle: "Online", listening: "Ouvindo…", thinking: "Processando…", speaking: "Falando…" } as const;
 
 /** UI do chat, usada no painel flutuante (compact) e na página /jarvis (full). */
 export function JarvisChat({ variant = "compact" }: { variant?: "compact" | "full" }) {
-  const j = useJarvis();
+  const j = useJarvisCtx();
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
   const full = variant === "full";
 
-  useEffect(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), [j.messages]);
+  // Corpo entre chaves: no Chrome novo scrollIntoView devolve uma Promise, que o React trataria como "limpeza".
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [j.messages]);
 
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -35,18 +38,35 @@ export function JarvisChat({ variant = "compact" }: { variant?: "compact" | "ful
     <div className="flex h-full min-h-0 flex-col">
       {/* Topo: orb + status */}
       <div className={cn("flex flex-col items-center gap-3 border-b border-border", full ? "py-8" : "py-5")}>
-        <JarvisOrb state={j.state} size={full ? 200 : 110} />
+        <JarvisOrb state={j.armed ? "listening" : j.state} size={full ? 200 : 110} />
         <div className="text-center">
           <p className="font-mono text-sm tracking-[0.35em] text-primary text-glow">{ASSISTANT_NAME.toUpperCase()}</p>
-          <p className="hud-label mt-1 !text-muted-foreground">{STATE_LABEL[j.state]}</p>
+          <p className="hud-label mt-1 !text-muted-foreground">
+            {j.armed ? "Pode falar…" : j.state === "idle" && j.handsFree ? `Diga "E aí, ${ASSISTANT_NAME}"` : STATE_LABEL[j.state]}
+          </p>
         </div>
+        <button
+          type="button"
+          onClick={j.toggleHandsFree}
+          aria-pressed={j.handsFree}
+          className={cn(
+            "flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition",
+            j.handsFree ? "border-primary/60 bg-primary/10 text-primary shadow-glow" : "border-border text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {j.handsFree ? <Ear className="h-3.5 w-3.5" /> : <EarOff className="h-3.5 w-3.5" />}
+          Mãos-livres: {j.handsFree ? "ligado" : "desligado"}
+        </button>
       </div>
 
       {/* Mensagens */}
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
         {j.messages.length === 0 && (
           <div className="space-y-2">
-            <p className="text-center text-sm text-muted-foreground">Às suas ordens, chefe. Pergunte por texto ou voz.</p>
+            <p className="text-center text-sm text-muted-foreground">
+              Às suas ordens, chefe. Pergunte por texto ou voz
+              {j.handsFree ? `, ou diga "E aí, ${ASSISTANT_NAME}" de qualquer tela.` : "."}
+            </p>
             <div className={cn("grid gap-2", full && "sm:grid-cols-2")}>
               {SUGGESTIONS.map((s) => (
                 <button

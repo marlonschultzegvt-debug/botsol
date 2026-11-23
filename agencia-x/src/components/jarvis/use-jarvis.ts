@@ -6,36 +6,102 @@ import type { OrbState } from "./jarvis-orb";
 export type ChatMsg = { role: "user" | "assistant"; content: string };
 
 // Tipos mínimos da Web Speech API (não vêm no lib.dom do TS).
+type SpeechResultList = ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }>;
 type SpeechRec = {
   lang: string; interimResults: boolean; continuous: boolean;
-  start(): void; stop(): void;
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onend: (() => void) | null; onerror: (() => void) | null;
+  start(): void; stop(): void; abort(): void;
+  onresult: ((e: { resultIndex: number; results: SpeechResultList }) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((e: { error?: string }) => void) | null;
+};
+type SpeechCtor = new () => SpeechRec;
+
+const getSpeechCtor = (): SpeechCtor | undefined => {
+  if (typeof window === "undefined") return undefined;
+  const W = window as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor };
+  return W.SpeechRecognition ?? W.webkitSpeechRecognition;
 };
 
 /**
- * Hook do assistente: histórico, streaming da resposta, microfone (pt-BR)
- * e leitura em voz alta (speechSynthesis do navegador).
+ * Palavra de ativação. O reconhecimento de voz em português costuma escrever "Jarvis"
+ * de vários jeitos ("jarbis", "jarves", "harvis"...), então aceitamos as variações.
+ * Funciona com ou sem "e aí" / "ei" / "ok" antes.
+ */
+const WAKE = /\b(jarvis|jarbis|jarvi|jarves|jarvez|jarviz|jervis|jarbas|harvis|charvis|djarvis)\b/i;
+
+/** Tempo que o Jarvis espera o pedido depois de ser chamado só pelo nome. */
+const ARMED_MS = 8000;
+
+/** Bip curto de "estou ouvindo" (Web Audio, sem arquivo). */
+function chime(ctx: AudioContext | null) {
+  if (!ctx) return;
+  try {
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = "sine";
+    o.frequency.setValueAtTime(880, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(1320, ctx.currentTime + 0.12);
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.18, ctx.currentTime + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.2);
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.22);
+  } catch {}
+}
+
+/**
+ * Hook do assistente: histórico, streaming da resposta, microfone (pt-BR),
+ * leitura em voz alta e modo mãos-livres ("E aí, Jarvis").
  * Upgrade futuro: trocar a voz do navegador por ElevenLabs.
  */
-export function useJarvis() {
+export function useJarvis(opts: { onWake?: () => void } = {}) {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [state, setState] = useState<OrbState>("idle");
   const [voiceOn, setVoiceOn] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
+  const [armed, setArmed] = useState(false); // chamado pelo nome, esperando o pedido
   const [error, setError] = useState<string | null>(null);
   const recRef = useRef<SpeechRec | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const audioRef = useRef<AudioContext | null>(null);
+  const onWakeRef = useRef(opts.onWake);
+  onWakeRef.current = opts.onWake;
 
-  // Preferência de voz por usuário (só conveniência local).
+  // Preferências por aparelho (só conveniência local).
   useEffect(() => {
-    try { setVoiceOn(localStorage.getItem("jarvis-voice") === "1"); } catch {}
+    try {
+      setVoiceOn(localStorage.getItem("jarvis-voice") === "1");
+      setHandsFree(localStorage.getItem("jarvis-handsfree") === "1");
+    } catch {}
   }, []);
+
   const toggleVoice = () =>
     setVoiceOn((v) => {
       try { localStorage.setItem("jarvis-voice", v ? "0" : "1"); } catch {}
       if (v) window.speechSynthesis?.cancel();
       return !v;
     });
+
+  const toggleHandsFree = () => {
+    if (!getSpeechCtor()) return setError("Este navegador não tem reconhecimento de voz. Use o Chrome.");
+    // O áudio do bip precisa nascer de um toque do usuário.
+    if (!audioRef.current) {
+      try { audioRef.current = new AudioContext(); } catch {}
+    }
+    setError(null);
+    setHandsFree((on) => {
+      try { localStorage.setItem("jarvis-handsfree", on ? "0" : "1"); } catch {}
+      if (!on) {
+        // Mãos-livres sem resposta falada não faz sentido: liga a voz junto.
+        setVoiceOn(true);
+        try { localStorage.setItem("jarvis-voice", "1"); } catch {}
+      } else {
+        setArmed(false);
+      }
+      return !on;
+    });
+  };
 
   const speak = useCallback(
     (text: string) => {
@@ -48,6 +114,7 @@ export function useJarvis() {
       if (pt) u.voice = pt;
       u.onstart = () => setState("speaking");
       u.onend = () => setState("idle");
+      u.onerror = () => setState("idle");
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
     },
@@ -86,9 +153,13 @@ export function useJarvis() {
     [messages, speak, state],
   );
 
+  // Refs para o ouvinte contínuo sempre usar a versão mais nova de send.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+
+  /** Microfone manual (botão 🎤): uma frase e pronto. */
   const listen = useCallback(() => {
-    const W = window as unknown as { SpeechRecognition?: new () => SpeechRec; webkitSpeechRecognition?: new () => SpeechRec };
-    const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    const Ctor = getSpeechCtor();
     if (!Ctor) return setError("Seu navegador não suporta comando de voz (use Chrome ou Edge).");
     if (state === "listening") return recRef.current?.stop();
 
@@ -99,7 +170,7 @@ export function useJarvis() {
     rec.onresult = (e) => {
       const transcript = Array.from(e.results).map((r) => r[0].transcript).join(" ");
       setState("idle");
-      void send(transcript);
+      void sendRef.current(transcript);
     };
     rec.onend = () => setState((s) => (s === "listening" ? "idle" : s));
     rec.onerror = () => setState("idle");
@@ -107,7 +178,78 @@ export function useJarvis() {
     window.speechSynthesis?.cancel();
     setState("listening");
     rec.start();
-  }, [send, state]);
+  }, [state]);
+
+  /**
+   * Modo mãos-livres: escuta contínua esperando "E aí, Jarvis".
+   * - "E aí Jarvis, me dá 3 ideias de Reels" → executa direto.
+   * - "E aí Jarvis" (só o nome) → bip, e a próxima frase em até 8s vira o pedido.
+   * Pausa enquanto ele pensa ou fala (para não ouvir a própria voz) e volta sozinho.
+   */
+  const busy = state !== "idle";
+  useEffect(() => {
+    if (!handsFree || busy) return;
+    const Ctor = getSpeechCtor();
+    if (!Ctor) return;
+
+    let stopped = false;
+    let armedUntil = 0;
+    let armedTimer: ReturnType<typeof setTimeout> | undefined;
+    const rec = new Ctor();
+    rec.lang = "pt-BR";
+    rec.continuous = true;
+    rec.interimResults = false;
+
+    const fire = (command: string) => {
+      armedUntil = 0;
+      clearTimeout(armedTimer);
+      setArmed(false);
+      onWakeRef.current?.();
+      void sendRef.current(command);
+    };
+
+    rec.onresult = (e) => {
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (!e.results[i].isFinal) continue;
+        const said = e.results[i][0].transcript.trim();
+        if (!said) continue;
+        const m = said.match(WAKE);
+        if (m && m.index !== undefined) {
+          // Tudo que veio depois do nome é o pedido.
+          const command = said.slice(m.index + m[0].length).replace(/^[\s,.!?:;-]+/, "").trim();
+          if (command.length > 2) return fire(command);
+          armedUntil = Date.now() + ARMED_MS;
+          setArmed(true);
+          chime(audioRef.current);
+          onWakeRef.current?.();
+          clearTimeout(armedTimer);
+          armedTimer = setTimeout(() => setArmed(false), ARMED_MS);
+        } else if (Date.now() < armedUntil) {
+          return fire(said);
+        }
+      }
+    };
+    // O Chrome encerra a escuta sozinho depois de um tempo em silêncio: reinicia.
+    rec.onend = () => {
+      if (stopped) return;
+      try { rec.start(); } catch {}
+    };
+    rec.onerror = (ev) => {
+      if (ev.error === "not-allowed" || ev.error === "service-not-allowed") {
+        stopped = true;
+        setHandsFree(false);
+        try { localStorage.setItem("jarvis-handsfree", "0"); } catch {}
+        setError("O navegador bloqueou o microfone. Permita o microfone para este site e ligue o mãos-livres de novo.");
+      }
+    };
+
+    try { rec.start(); } catch {}
+    return () => {
+      stopped = true;
+      clearTimeout(armedTimer);
+      try { rec.abort(); } catch {}
+    };
+  }, [handsFree, busy]);
 
   const stop = () => {
     abortRef.current?.abort();
@@ -117,5 +259,10 @@ export function useJarvis() {
 
   const reset = () => { stop(); setMessages([]); setError(null); };
 
-  return { messages, state, error, voiceOn, toggleVoice, send, listen, stop, reset };
+  return {
+    messages, state, error, voiceOn, toggleVoice, send, listen, stop, reset,
+    handsFree, toggleHandsFree, armed,
+  };
 }
+
+export type JarvisApi = ReturnType<typeof useJarvis>;
