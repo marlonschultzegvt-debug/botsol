@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 export type BoardPiece = {
   id: string; title: string; clientId: string; client: string; format: ContentFormat; platform: Platform;
   status: ContentStatus; scheduledAt: string; script: string | null; caption: string | null;
+  /** Respostas do cliente no portal (mais recentes primeiro). */
+  approvals?: { decision: "PENDING" | "APPROVED" | "CHANGES_REQUESTED"; comment: string | null; by: string; at: string }[];
 };
 
 const FORMATS: Record<ContentFormat, string> = { REELS: "Reels", CAROUSEL: "Carrossel", STATIC: "Post", STORIES: "Stories", SHORTS: "Shorts" };
@@ -215,7 +217,7 @@ export function CalendarBoard({
                     {view === "week" ? <span className="md:hidden">{WEEKDAYS[i]}&nbsp;</span> : null}{d.getDate()}
                   </span>
                   {canEdit && (
-                    <button onClick={() => { setError(null); setDraft(newDraft(k)); }} className="text-muted-foreground opacity-0 transition hover:text-primary group-hover:opacity-100" aria-label="Adicionar">
+                    <button onClick={() => { setError(null); setDraft(newDraft(k)); }} className="text-muted-foreground transition hover:text-primary sm:opacity-0 sm:group-hover:opacity-100" aria-label="Adicionar">
                       <Plus className="h-3.5 w-3.5" />
                     </button>
                   )}
@@ -297,6 +299,17 @@ export function CalendarBoard({
                   ))}
                 </div>
               </div>
+              {!!draft.approvals?.length && (
+                <div className="rounded-md border border-border bg-muted/20 p-3">
+                  <p className="hud-label mb-1.5">Resposta do cliente</p>
+                  {draft.approvals.map((a, i) => (
+                    <p key={i} className={cn("text-xs", a.decision === "CHANGES_REQUESTED" ? "text-warning" : "text-success")}>
+                      {a.decision === "CHANGES_REQUESTED" ? "🔁 Pediu ajuste" : "✅ Aprovou"} — {a.by}, {new Date(a.at).toLocaleDateString("pt-BR")}
+                      {a.comment && <span className="block text-foreground/80">“{a.comment}”</span>}
+                    </p>
+                  ))}
+                </div>
+              )}
               <div><Label>Roteiro</Label><Textarea value={draft.script ?? ""} onChange={(e) => setDraft({ ...draft, script: e.target.value })} className="min-h-[160px] font-mono text-xs" /></div>
               <div><Label>Legenda</Label><Textarea value={draft.caption ?? ""} onChange={(e) => setDraft({ ...draft, caption: e.target.value })} className="min-h-[90px]" /></div>
             </fieldset>

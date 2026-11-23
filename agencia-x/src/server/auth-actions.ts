@@ -10,11 +10,14 @@ import { db } from "@/lib/db";
 export type FormState = { error?: string; values?: Record<string, string> } | undefined;
 
 export async function loginAction(_: FormState, form: FormData): Promise<FormState> {
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  // Destino pelo papel (a senha ainda é conferida no signIn; aqui só escolhemos a página).
+  const m = await db.membership.findFirst({ where: { user: { email } }, orderBy: { id: "asc" }, select: { role: true } });
   try {
     await signIn("credentials", {
-      email: String(form.get("email") ?? ""),
+      email,
       password: String(form.get("password") ?? ""),
-      redirectTo: "/dashboard",
+      redirectTo: m?.role === "CLIENT" ? "/portal" : "/dashboard",
     });
   } catch (e) {
     if (e instanceof AuthError) return { error: "E-mail ou senha incorretos.", values: { email: String(form.get("email") ?? "") } };

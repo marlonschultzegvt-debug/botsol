@@ -9,6 +9,7 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import {
   addInvoiceAction, addNoteAction, deleteClientAction, deleteNoteAction, setInvoiceStatusAction,
 } from "@/server/actions/clients";
+import { createPortalAccessAction, revokePortalAccessAction } from "@/server/actions/ops";
 import { NOTE_TYPE } from "./status";
 
 export function NoteForm({ clientId }: { clientId: string }) {
@@ -35,7 +36,7 @@ export function DeleteNoteButton({ id }: { id: string }) {
     <button
       disabled={pending}
       onClick={() => confirm("Apagar esta nota?") && start(() => deleteNoteAction(id))}
-      className="text-muted-foreground opacity-0 transition hover:text-danger group-hover:opacity-100"
+      className="text-muted-foreground transition hover:text-danger sm:opacity-0 sm:group-hover:opacity-100"
       aria-label="Apagar nota"
     >
       <X className="h-3.5 w-3.5" />
@@ -94,5 +95,52 @@ export function DeleteClientButton({ id, name }: { id: string; name: string }) {
     >
       <Trash2 /> Excluir cliente
     </Button>
+  );
+}
+
+/** Acesso do cliente ao portal: cria login com senha temporária (mostrada uma vez). */
+export function PortalAccess({ clientId, users }: { clientId: string; users: { id: string; name: string; email: string }[] }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [result, setResult] = useState<{ email: string; password: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  const create = (n: string, e: string) => start(async () => {
+    setError(null);
+    const r = await createPortalAccessAction(clientId, n, e);
+    if (r.error) return setError(r.error);
+    setResult({ email: e.trim().toLowerCase(), password: r.password! });
+    setName(""); setEmail("");
+  });
+
+  return (
+    <div className="space-y-3">
+      {users.map((u) => (
+        <div key={u.id} className="flex items-center gap-2 text-sm">
+          <span className="min-w-0 flex-1 truncate">{u.name}<span className="block truncate text-xs text-muted-foreground">{u.email}</span></span>
+          <Button size="sm" variant="ghost" disabled={pending} onClick={() => create(u.name, u.email)} title="Gerar nova senha">Nova senha</Button>
+          <Button size="sm" variant="ghost" className="text-danger" disabled={pending}
+            onClick={() => confirm(`Remover o acesso de ${u.name}?`) && start(async () => { await revokePortalAccessAction(clientId, u.id); })}>
+            Remover
+          </Button>
+        </div>
+      ))}
+      {result && (
+        <div className="rounded-md border border-success/40 bg-success/10 p-3 text-sm">
+          <p className="font-medium text-success">Acesso criado. Envie ao cliente (a senha não aparece de novo):</p>
+          <p className="mt-1 font-mono text-xs">Login: {result.email}<br />Senha: {result.password}</p>
+          <Button size="sm" variant="outline" className="mt-2" onClick={() => navigator.clipboard.writeText(
+            `Acesse o portal: ${window.location.origin}/login\nE-mail: ${result.email}\nSenha: ${result.password}`,
+          )}>Copiar mensagem</Button>
+        </div>
+      )}
+      <div className="grid gap-2">
+        <Input placeholder="Nome de quem vai aprovar" value={name} onChange={(e) => setName(e.target.value)} />
+        <Input placeholder="E-mail" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Button size="sm" variant="outline" disabled={pending || !name || !email} onClick={() => create(name, email)}>Criar acesso ao portal</Button>
+        {error && <p className="text-xs text-danger">{error}</p>}
+      </div>
+    </div>
   );
 }

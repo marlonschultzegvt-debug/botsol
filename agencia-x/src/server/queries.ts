@@ -174,6 +174,7 @@ export async function getClient(agencyId: string, id: string) {
       contents: { orderBy: { scheduledAt: "desc" }, take: 15 },
       contracts: { include: { service: { select: { name: true } }, deliverables: { orderBy: { dueDate: "asc" } } } },
       competitors: { include: { snapshots: { orderBy: { createdAt: "desc" }, take: 1 } } },
+      portalUsers: { where: { role: "CLIENT" }, include: { user: { select: { id: true, name: true, email: true } } } },
     },
   });
   if (!c) return null;
@@ -192,7 +193,10 @@ export type ClientDetail = NonNullable<Awaited<ReturnType<typeof getClient>>>;
 export async function listContentInRange(agencyId: string, from: Date, to: Date, clientId?: string) {
   return db.contentPiece.findMany({
     where: { agencyId, clientId: clientId || undefined, scheduledAt: { gte: from, lt: to } },
-    include: { client: { select: { id: true, name: true } } },
+    include: {
+      client: { select: { id: true, name: true } },
+      approvals: { orderBy: { createdAt: "desc" }, take: 3, include: { reviewer: { select: { name: true } } } },
+    },
     orderBy: { scheduledAt: "asc" },
   });
 }

@@ -1,6 +1,9 @@
 import { redirect } from "next/navigation";
+import { auth } from "@/auth";
 
-// Próxima etapa: landing page de vendas aqui; por enquanto vai direto ao app.
-export default function Home() {
-  redirect("/dashboard");
+// Raiz: manda cada papel para a sua área. (Futuro: landing page de vendas para visitantes.)
+export default async function Home() {
+  const session = await auth();
+  if (!session?.user) redirect("/login");
+  redirect(session.user.role === "CLIENT" ? "/portal" : "/dashboard");
 }

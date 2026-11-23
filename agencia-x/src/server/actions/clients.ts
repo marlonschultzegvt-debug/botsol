@@ -128,5 +128,6 @@ export async function setInvoiceStatusAction(invoiceId: string, status: InvoiceS
   if (!inv) return;
   await db.invoice.update({ where: { id: invoiceId }, data: { status, paidAt: status === "PAID" ? new Date() : null } });
   revalidatePath(`/clientes/${inv.clientId}`);
+  revalidatePath("/campanhas");
   revalidatePath("/dashboard");
 }

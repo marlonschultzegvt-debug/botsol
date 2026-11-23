@@ -21,7 +21,20 @@ Plataforma para agências de marketing e criadores: **conteúdo com IA (Claude)*
 | Espião + análises salvas (reabrir sem gastar crédito) | ✅ IA real; dados reais do Instagram com `APIFY_TOKEN` |
 | Assistente (chat + voz pt-BR) com os dados reais da agência | ✅ IA real |
 | Créditos de IA por mês (limite do plano) | ✅ |
-| Campanhas, Tarefas, Portal do Cliente, Lote, Configurações | 🔜 páginas provisórias |
+| **Campanhas & Serviços**: catálogo de pacotes, contratos com entregas automáticas e prazos, entregas atrasadas destacadas | ✅ etapa 3 |
+| **Financeiro**: faturado x recebido do mês, faturas em aberto, gerar mensalidades do mês em 1 clique, marcar atrasadas | ✅ etapa 3 |
+| **Tarefas**: kanban (a fazer, fazendo, revisão, feito) com arrastar e soltar, prioridade, responsável, prazo, filtros | ✅ etapa 3 |
+| **Portal do Cliente**: login próprio, aprovar ou pedir ajuste, próximos 30 dias, publicados, envio de arquivos, faturas | ✅ etapa 3 |
+| Acesso ao portal criado pela ficha do cliente (senha temporária) + "ver como cliente" | ✅ etapa 3 |
+| Geração em Lote, Configurações (marca, equipe) | 🔜 páginas provisórias |
+
+## ✅ O que falta VOCÊ fazer (uma vez, dá para fazer pelo celular)
+1. **Chave do Claude:** crie em console.anthropic.com → API Keys. Vai em `ANTHROPIC_API_KEY`.
+2. **Banco:** crie um projeto grátis no supabase.com → copie a *connection string* para `DATABASE_URL`.
+3. **Arquivos do portal:** no mesmo projeto Supabase → Storage → crie o bucket privado `assets` → copie `SUPABASE_URL` e a `service_role key`.
+4. **Publicar:** em vercel.com → *Add New Project* → importe este repositório → **Root Directory = `agencia-x`** → cole as variáveis do `.env.example` → Deploy.
+5. Depois do primeiro deploy, rode uma vez `npm run db:push` (ou peça ao Claude para rodar).
+6. *(Opcional)* `APIFY_TOKEN` em apify.com para o Espião usar dados reais do Instagram.
 
 ## Rodando localmente
 ```bash
@@ -47,6 +60,10 @@ npm run dev                 # http://localhost:3000
 | Ver e editar financeiro | ✅ | ✅ | — | — | — |
 | Criar/editar conteúdos no calendário | ✅ | ✅ | ✅ | ✅ | — |
 | Excluir cliente | ✅ | — | — | — | — |
+| Contratos, serviços e acesso ao portal | ✅ | ✅ | — | — | — |
+| Marcar entregas e mover tarefas | ✅ | ✅ | ✅ | ✅ | — |
+| Aprovar conteúdo / pedir ajuste | — | — | — | — | ✅ (só os seus) |
+| Enviar arquivos | ✅ | ✅ | ✅ | ✅ | ✅ (só os seus) |
 | Área da agência | ✅ | ✅ | ✅ | ✅ | só `/portal` |
 
 ## Deploy

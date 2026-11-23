@@ -25,20 +25,22 @@ Legenda: ✅ protótipo pronto · 🔜 próxima etapa
 | `/clientes` | **Lista de clientes** ✅ | Abas por status, busca (nome, nicho, @), MRR, última fatura | todos internos (valores só Admin/Gestor) |
 | `/clientes/novo` | **Novo cliente** ✅ | Formulário completo (tom de voz e público alimentam a IA) | Admin, Gestor |
 | `/clientes/[id]` | **Ficha do cliente** ✅ | Indicadores, conteúdos, financeiro (criar fatura, mudar status), contratos e entregas, histórico de interações, estratégia, concorrentes, edição | todos internos (financeiro só Admin/Gestor) |
-| `/campanhas` | Campanhas & serviços 🔜 | Catálogo de pacotes, contratos, entregas e prazos | Admin, Gestor |
-| `/financeiro` | Financeiro 🔜 | Faturas pagas/pendentes/atrasadas, MRR, inadimplência | Admin |
-| `/tarefas` | Tarefas 🔜 | Kanban + lista, responsável, prioridade | todos internos |
+| `/campanhas` | **Campanhas & serviços** ✅ | Abas: contratos (entregas com prazo, atrasos), serviços (pacotes), financeiro (em aberto, gerar mensalidades) | todos internos (valores só Admin/Gestor) |
+| (aba de `/campanhas`) | **Financeiro** ✅ | Faturado x recebido do mês, em aberto, atrasado, status das faturas | Admin, Gestor |
+| `/tarefas` | **Tarefas** ✅ | Kanban com arrastar e soltar, prioridade, responsável, prazo, filtros (minhas, por cliente) | todos internos |
 | `/briefings` | Templates de briefing 🔜 | Construtor de formulário, link para o cliente responder | Admin, Gestor |
 | `/configuracoes` | Configurações 🔜 | Marca (logo, cores), equipe e papéis, plano e créditos, integrações | Admin |
 
-## Portal do Cliente — grupo `(portal)` 🔜
+## Portal do Cliente — grupo `(portal)` ✅
+Uma página só, com layout próprio. O cliente vê apenas o próprio cadastro; a equipe abre `/portal?client=ID` em modo prévia (sem aprovar).
+
 | Rota | Tela | Conteúdo |
 |------|------|----------|
-| `/portal` | Início | Resumo do mês, pendências de aprovação |
-| `/portal/aprovacoes` | Aprovações | Ver roteiro/arte/vídeo, aprovar ou pedir ajuste com comentário |
-| `/portal/calendario` | Calendário | Somente leitura |
-| `/portal/relatorios` | Relatórios | Resultados do mês |
-| `/portal/arquivos` | Upload | Enviar fotos e vídeos brutos |
+| `/portal` | Início ✅ | Pendências de aprovação, próximos 30 dias, publicados, arquivos, faturas |
+| (seção) | Aprovações ✅ | Ver roteiro e legenda, aprovar ou pedir ajuste com comentário (volta para a equipe em "Editado") |
+| (seção) | Calendário ✅ | Próximos 30 dias, somente leitura |
+| `/portal/relatorios` | Relatórios 🔜 | Resultados do mês |
+| (seção) | Arquivos ✅ | Enviar fotos, vídeos, áudio e PDF; baixar; apagar os próprios |
 
 ## Componentes globais
 - **Sidebar** (gaveta no mobile) agrupada por Comando / Criação / Gestão / Sistema, com medidor de créditos de IA ✅

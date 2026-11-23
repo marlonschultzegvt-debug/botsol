@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ClientForm } from "@/components/clients/client-form";
 import {
-  DeleteClientButton, DeleteNoteButton, InvoiceForm, InvoiceStatusSelect, NoteForm,
+  DeleteClientButton, DeleteNoteButton, InvoiceForm, InvoiceStatusSelect, NoteForm, PortalAccess,
 } from "@/components/clients/client-widgets";
 import { CLIENT_STATUS, CONTENT_STATUS, NOTE_TYPE, PAYMENT_STATUS } from "@/components/clients/status";
 import { can, requireUser } from "@/lib/session";
@@ -189,6 +189,18 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               </ol>
             </CardContent>
           </Card>
+
+          {canEdit && (
+            <Card>
+              <CardHeader className="flex-row items-center justify-between space-y-0">
+                <CardTitle>Acesso ao portal</CardTitle>
+                <Link href={`/portal?client=${c.id}`} className="text-xs text-primary hover:underline">Ver como cliente →</Link>
+              </CardHeader>
+              <CardContent>
+                <PortalAccess clientId={c.id} users={c.portalUsers.map((m) => m.user)} />
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader><CardTitle>Estratégia</CardTitle></CardHeader>
