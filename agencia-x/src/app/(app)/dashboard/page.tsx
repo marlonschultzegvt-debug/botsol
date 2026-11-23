@@ -1,24 +1,41 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, DollarSign, Megaphone, Sparkles, Users, Radar } from "lucide-react";
+import { AlertTriangle, CalendarClock, DollarSign, Megaphone, Radar, Sparkles, Users } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { PipelineChart, RevenueChart } from "@/components/dashboard/charts";
 import { JarvisOrb } from "@/components/jarvis/jarvis-orb";
-import { agencyStats, campaigns, clients, contentPipeline, deadlines, revenueByMonth } from "@/lib/mock-data";
+import { CLIENT_STATUS, PAYMENT_STATUS } from "@/components/clients/status";
+import { can, requireUser } from "@/lib/session";
+import { getDashboard } from "@/server/queries";
 import { ASSISTANT_NAME, brl } from "@/lib/utils";
 
 export const metadata = { title: "Dashboard" };
 
-const statusBadge = { ACTIVE: ["success", "Ativo"], PAUSED: ["warning", "Pausado"], CHURN: ["danger", "Churn"] } as const;
-const payBadge = { PAID: ["success", "Pago"], PENDING: ["warning", "Pendente"], OVERDUE: ["danger", "Atrasado"] } as const;
+const greeting = () => {
+  const h = Number(new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: "America/Sao_Paulo" }));
+  return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
+};
 
-export default function DashboardPage() {
-  const s = agencyStats();
-  const last = revenueByMonth.at(-1)!;
-  const prev = revenueByMonth.at(-2)!;
-  const growth = (((last.receita - prev.receita) / prev.receita) * 100).toFixed(1);
+const shortDate = (d: Date) => {
+  const today = new Date();
+  const diff = Math.round((new Date(d).setHours(0, 0, 0, 0) - today.setHours(0, 0, 0, 0)) / 864e5);
+  if (diff === 0) return "Hoje";
+  if (diff === 1) return "Amanhã";
+  if (diff < 0) return `Atrasado ${-diff}d`;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+};
+
+export default async function DashboardPage() {
+  const user = await requireUser();
+  const d = await getDashboard(user.agencyId);
+  const s = d.stats;
+  const firstName = user.name.split(" ")[0];
+  const money = can(user.role, "finance:read");
+  // Sem permissão financeira: some faturas e valores.
+  const deadlines = money ? d.deadlines : d.deadlines.filter((x) => x.kind !== "Financeiro");
+  const lateCount = deadlines.filter((x) => x.late).length;
 
   return (
     <div className="space-y-6">
@@ -28,10 +45,16 @@ export default function DashboardPage() {
           <JarvisOrb size={88} />
           <div className="flex-1 text-center sm:text-left">
             <p className="hud-label">Briefing de {ASSISTANT_NAME}</p>
-            <h1 className="mt-1 text-xl font-semibold">Bom dia, chefe. Tudo sob controle.</h1>
+            <h1 className="mt-1 text-xl font-semibold">
+              {greeting()}, {firstName}. {lateCount ? `${lateCount} ${lateCount > 1 ? "itens pedem" : "item pede"} atenção.` : "Tudo sob controle."}
+            </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {s.inApproval} conteúdos aguardando aprovação · {s.overdue.length} fatura atrasada ({s.overdue.map((c) => c.name).join(", ")}) ·{" "}
-              {deadlines.length} prazos nesta semana.
+              {s.inApproval} conteúdos aguardando aprovação ·{" "}
+              {money &&
+                (d.overdueInvoices.length
+                  ? `${d.overdueInvoices.length} fatura(s) vencida(s) (${d.overdueInvoices.map((o) => o.client).join(", ")}) · `
+                  : "nenhuma fatura vencida · ")}
+              {deadlines.length} prazos nos próximos 7 dias.
             </p>
           </div>
           <div className="flex gap-2">
@@ -43,58 +66,65 @@ export default function DashboardPage() {
 
       {/* KPIs */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Clientes ativos" value={String(s.activeClients)} hint={`${clients.length} no total`} icon={Users} />
-        <StatCard label="Receita do mês" value={brl(last.receita)} hint={`+${growth}% vs mês anterior`} trend="up" icon={DollarSign} />
+        <StatCard label="Clientes ativos" value={String(s.activeClients)} hint={money ? `MRR ${brl(s.mrr)}` : `${s.totalClients} no total`} icon={Users} />
+        {money ? (
+          <StatCard
+            label="Faturado no mês" value={brl(s.invoicedThisMonth)}
+            hint={`${s.growthPct >= 0 ? "+" : ""}${s.growthPct.toFixed(1)}% vs mês anterior`}
+            trend={s.growthPct >= 0 ? "up" : "down"} icon={DollarSign}
+          />
+        ) : (
+          <StatCard label="Publicados" value={String(d.pipeline.find((p) => p.status === "Publicado")?.qtd ?? 0)} hint="conteúdos no ar" icon={Sparkles} />
+        )}
         <StatCard label="Campanhas" value={String(s.runningCampaigns)} hint="em andamento" icon={Megaphone} />
         <StatCard label="Em aprovação" value={String(s.inApproval)} hint="aguardando cliente" icon={CalendarClock} />
       </div>
 
       {/* Gráficos */}
       <div className="grid gap-4 lg:grid-cols-5">
-        <Card className="lg:col-span-3">
+        {money && <Card className="lg:col-span-3">
           <CardHeader>
-            <CardTitle>Receita x Meta</CardTitle>
-            <CardDescription>Últimos 6 meses</CardDescription>
+            <CardTitle>Faturado x Recebido</CardTitle>
+            <CardDescription>Últimos 6 meses — a diferença é o que falta receber</CardDescription>
           </CardHeader>
-          <CardContent><RevenueChart data={revenueByMonth} /></CardContent>
-        </Card>
-        <Card className="lg:col-span-2">
+          <CardContent><RevenueChart data={d.revenue} /></CardContent>
+        </Card>}
+        <Card className={money ? "lg:col-span-2" : "lg:col-span-5"}>
           <CardHeader>
             <CardTitle>Pipeline de conteúdo</CardTitle>
             <CardDescription>Peças por etapa</CardDescription>
           </CardHeader>
-          <CardContent><PipelineChart data={contentPipeline} /></CardContent>
+          <CardContent><PipelineChart data={d.pipeline} /></CardContent>
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        {/* Prazos */}
         <Card>
-          <CardHeader><CardTitle>Prazos próximos</CardTitle></CardHeader>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle>Prazos próximos</CardTitle>
+            <Link href="/calendario" className="text-xs text-primary hover:underline">Calendário →</Link>
+          </CardHeader>
           <CardContent className="space-y-3">
-            {deadlines.map((d) => (
-              <div key={d.id} className="flex items-start gap-3">
-                {d.due.startsWith("Atrasado") ? (
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" />
-                ) : (
-                  <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                )}
+            {deadlines.length === 0 && <p className="text-sm text-muted-foreground">Nada para os próximos 7 dias.</p>}
+            {deadlines.map((x) => (
+              <div key={x.id} className="flex items-start gap-3">
+                {x.late ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-danger" /> : <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm">{d.title}</p>
-                  <p className="text-xs text-muted-foreground">{d.client} · {d.kind}</p>
+                  <p className="truncate text-sm">{x.title}</p>
+                  <p className="text-xs text-muted-foreground">{x.client} · {x.kind}</p>
                 </div>
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{d.due}</span>
+                <span className={`shrink-0 font-mono text-[11px] ${x.late ? "text-danger" : "text-muted-foreground"}`}>{shortDate(x.date)}</span>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        {/* Campanhas */}
         <Card>
           <CardHeader><CardTitle>Campanhas em andamento</CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            {campaigns.map((c) => (
-              <div key={c.name}>
+            {d.campaigns.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma campanha ativa.</p>}
+            {d.campaigns.map((c) => (
+              <div key={c.id}>
                 <div className="mb-1.5 flex justify-between text-sm">
                   <span className="truncate">{c.name}</span>
                   <span className="font-mono text-xs text-primary">{c.progress}%</span>
@@ -102,28 +132,30 @@ export default function DashboardPage() {
                 <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                   <div className="h-full rounded-full bg-primary" style={{ width: `${c.progress}%` }} />
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{c.client}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{c.client} · entregas concluídas</p>
               </div>
             ))}
           </CardContent>
         </Card>
 
-        {/* Clientes */}
         <Card>
-          <CardHeader><CardTitle>Clientes</CardTitle></CardHeader>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle>Clientes</CardTitle>
+            <Link href="/clientes" className="text-xs text-primary hover:underline">Ver todos →</Link>
+          </CardHeader>
           <CardContent className="space-y-2.5">
-            {clients.map((c) => {
-              const [sv, sl] = statusBadge[c.status];
-              const [pv, pl] = payBadge[c.payment];
+            {d.clients.map((c) => {
+              const st = CLIENT_STATUS[c.status];
+              const pay = PAYMENT_STATUS[c.payment];
               return (
-                <div key={c.id} className="flex items-center gap-2">
+                <Link key={c.id} href={`/clientes/${c.id}`} className="-mx-2 flex items-center gap-2 rounded-md px-2 py-1 hover:bg-accent">
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm">{c.name}</p>
-                    <p className="text-xs text-muted-foreground">{c.niche} · {c.monthlyFee ? brl(c.monthlyFee) : "—"}</p>
+                    <p className="text-xs text-muted-foreground">{c.niche}{money && ` · ${c.monthlyFee ? brl(c.monthlyFee) : "—"}`}</p>
                   </div>
-                  <Badge variant={sv}>{sl}</Badge>
-                  {c.status !== "CHURN" && <Badge variant={pv}>{pl}</Badge>}
-                </div>
+                  <Badge variant={st.variant}>{st.label}</Badge>
+                  {money && c.status !== "CHURN" && <Badge variant={pay.variant}>{pay.label}</Badge>}
+                </Link>
               );
             })}
           </CardContent>

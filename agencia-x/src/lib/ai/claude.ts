@@ -21,21 +21,30 @@ const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
 
 type StreamArgs = {
+  /** Parte fixa do system prompt (cacheada). */
   system: string;
+  /** Parte que muda a cada chamada (ex.: dados vivos da agência) — fica depois do cache. */
+  systemDynamic?: string;
   messages: Anthropic.Beta.BetaMessageParam[];
   effort?: Effort;
   maxTokens?: number;
+  /** Chamado ao fim com o texto completo e o uso de tokens (para salvar no histórico). */
+  onFinish?: (r: { text: string; inputTokens: number; outputTokens: number; model: string }) => Promise<void> | void;
 };
+
+/** Erro "nosso" (recusa, resposta cortada): a mensagem já está em português. */
+export class AiOutputError extends Error {}
 
 /** Converte erros da API em mensagens claras em português. */
 export function friendlyError(err: unknown): string {
+  if (err instanceof AiOutputError) return err.message;
   if (err instanceof Anthropic.AuthenticationError)
     return "Chave da API do Claude inválida ou ausente. Configure ANTHROPIC_API_KEY no .env.";
   if (err instanceof Anthropic.RateLimitError)
     return "Limite de uso da API atingido. Aguarde alguns segundos e tente de novo.";
   if (err instanceof Anthropic.BadRequestError) return `Requisição inválida: ${err.message}`;
   if (err instanceof Anthropic.APIError) return `Erro da API do Claude (${err.status}): ${err.message}`;
-  if (err instanceof Error && /api.?key|credential/i.test(err.message))
+  if (err instanceof Error && /api.?key|credential|authentication method/i.test(err.message))
     return "Credencial do Claude não encontrada. Configure ANTHROPIC_API_KEY no .env.";
   return "Erro inesperado ao falar com a IA.";
 }
@@ -44,7 +53,7 @@ export function friendlyError(err: unknown): string {
  * Faz uma chamada em streaming e devolve um ReadableStream de texto puro,
  * pronto para ser retornado por uma Route Handler do Next.js.
  */
-export function streamText({ system, messages, effort = "medium", maxTokens = 32000 }: StreamArgs) {
+export function streamText({ system, systemDynamic, messages, effort = "medium", maxTokens = 32000, onFinish }: StreamArgs) {
   const encoder = new TextEncoder();
 
   return new ReadableStream<Uint8Array>({
@@ -53,7 +62,10 @@ export function streamText({ system, messages, effort = "medium", maxTokens = 32
         const stream = anthropic.beta.messages.stream({
           model: MODEL,
           max_tokens: maxTokens,
-          system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+          system: [
+            { type: "text", text: system, cache_control: { type: "ephemeral" } },
+            ...(systemDynamic ? [{ type: "text" as const, text: systemDynamic }] : []),
+          ],
           messages,
           output_config: { effort },
           betas: [FALLBACK_BETA],
@@ -67,6 +79,12 @@ export function streamText({ system, messages, effort = "medium", maxTokens = 32
         }
 
         const final = await stream.finalMessage();
+        const text = final.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+        if (text && final.stop_reason !== "refusal") {
+          await Promise.resolve(
+            onFinish?.({ text, inputTokens: final.usage.input_tokens, outputTokens: final.usage.output_tokens, model: final.model }),
+          ).catch((e) => console.error("[claude] onFinish", e));
+        }
         if (final.stop_reason === "refusal") {
           controller.enqueue(encoder.encode("\n\n> ⚠️ A IA não pôde atender este pedido. Reformule o briefing."));
         } else if (final.stop_reason === "max_tokens") {
@@ -96,7 +114,7 @@ export async function generateJson<T>({
   prompt: string;
   schema: Record<string, unknown>;
   effort?: Effort;
-}): Promise<T> {
+}): Promise<{ data: T; inputTokens: number; outputTokens: number; model: string }> {
   // Streaming + finalMessage: análise longa sem risco de timeout HTTP.
   const stream = anthropic.beta.messages.stream({
     model: MODEL,
@@ -109,9 +127,14 @@ export async function generateJson<T>({
   });
   const msg = await stream.finalMessage();
 
-  if (msg.stop_reason === "refusal") throw new Error("A IA recusou este pedido.");
-  if (msg.stop_reason === "max_tokens") throw new Error("Relatório ficou grande demais; tente novamente.");
+  if (msg.stop_reason === "refusal") throw new AiOutputError("A IA recusou este pedido.");
+  if (msg.stop_reason === "max_tokens") throw new AiOutputError("Relatório ficou grande demais; tente novamente.");
 
   const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-  return JSON.parse(text) as T;
+  return {
+    data: JSON.parse(text) as T,
+    inputTokens: msg.usage.input_tokens,
+    outputTokens: msg.usage.output_tokens,
+    model: msg.model,
+  };
 }

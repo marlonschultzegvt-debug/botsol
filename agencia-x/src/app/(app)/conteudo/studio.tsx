@@ -1,5 +1,6 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Check, Clapperboard, Copy, GalleryHorizontal, History, Loader2, MessageSquareText, Sparkles, Square, Zap, CalendarPlus } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +9,8 @@ import { Markdown } from "@/components/ui/markdown";
 import { JarvisOrb } from "@/components/jarvis/jarvis-orb";
 import { NICHE_TEMPLATES } from "@/lib/ai/prompts/niches";
 import type { ContentType } from "@/lib/ai/prompts/content";
-import { clients } from "@/lib/mock-data";
+import type { ClientOption } from "@/server/queries";
+import { saveGenerationToCalendarAction } from "@/server/actions/content";
 import { readTextStream } from "@/lib/read-stream";
 import { cn } from "@/lib/utils";
 
@@ -22,14 +24,21 @@ const TYPES: { id: ContentType; label: string; icon: typeof Sparkles; desc: stri
 const TONES = ["Descontraído e próximo", "Autoridade / especialista", "Divertido com humor", "Inspirador", "Direto e provocativo", "Luxo / sofisticado"];
 const GOALS = ["Alcance (viralizar)", "Engajamento (comentários/salvamentos)", "Autoridade", "Gerar leads no direct", "Vender produto/serviço"];
 
-type HistoryItem = { id: string; type: ContentType; topic: string; output: string; at: string };
-const HISTORY_KEY = "studio-history";
+export type HistoryItem = {
+  id: string; type: ContentType; topic: string; clientId: string | null; client: string | null; output: string; at: string;
+};
+
+const FORMAT_FOR: Record<ContentType, "REELS" | "STATIC" | "CAROUSEL"> = {
+  reels: "REELS", legenda: "STATIC", carrossel: "CAROUSEL", hooks: "REELS",
+};
+const todayIso = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 
 /** Mapeia o nicho do cliente para um template pronto. */
 const nicheFor = (niche: string) =>
   NICHE_TEMPLATES.find((n) => n.niche.toLowerCase().includes(niche.toLowerCase().split(" ")[0]))?.id ?? "";
 
-export function ContentStudio() {
+export function ContentStudio({ clients, history }: { clients: ClientOption[]; history: HistoryItem[] }) {
+  const router = useRouter();
   const [type, setType] = useState<ContentType>("reels");
   const [clientId, setClientId] = useState("");
   const [nicheId, setNicheId] = useState("");
@@ -45,26 +54,40 @@ export function ContentStudio() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [history, setHistory] = useState<HistoryItem[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Histórico local (conveniência). Na etapa do banco: tabela AiGeneration.
+  // Geração ativa (para salvar no calendário com vínculo ao histórico).
+  const [activeGenId, setActiveGenId] = useState<string | null>(null);
+  const [justFinished, setJustFinished] = useState(false);
+  const [calOpen, setCalOpen] = useState(false);
+  const [calClient, setCalClient] = useState("");
+  const [calDate, setCalDate] = useState(todayIso());
+  const [calMsg, setCalMsg] = useState<string | null>(null);
+  const [saving, startSaving] = useTransition();
+
   useEffect(() => {
-    try { setHistory(JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "[]")); } catch {}
-    // Ideia vinda do Espião: /conteudo?topic=...
-    const t = new URLSearchParams(window.location.search).get("topic");
-    if (t) setTopic(t);
+    // Ideia vinda do Espião: /conteudo?topic=...&client=...
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("topic")) setTopic(q.get("topic")!);
+    if (q.get("client")) onClient(q.get("client")!);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const saveHistory = (item: HistoryItem) => {
-    const next = [item, ...history].slice(0, 20);
-    setHistory(next);
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)); } catch {}
-  };
+
+  // Depois de gerar, o servidor salva no histórico; ao recarregar, a mais nova é a ativa.
+  useEffect(() => {
+    if (justFinished && history[0]) {
+      setActiveGenId(history[0].id);
+      setJustFinished(false);
+    }
+  }, [history, justFinished]);
 
   const onClient = (id: string) => {
     setClientId(id);
     const c = clients.find((x) => x.id === id);
-    if (c) setNicheId(nicheFor(c.niche));
+    if (c) {
+      setNicheId(nicheFor(c.niche));
+      if (c.targetAudience) setAudience(c.targetAudience);
+    }
   };
 
   async function generate(e: React.FormEvent) {
@@ -72,9 +95,11 @@ export function ContentStudio() {
     if (topic.trim().length < 3) return setError("Descreva o tema do conteúdo.");
     setError(null);
     setOutput("");
+    setActiveGenId(null);
+    setCalOpen(false);
+    setCalMsg(null);
     setLoading(true);
     abortRef.current = new AbortController();
-    const client = clients.find((c) => c.id === clientId);
 
     try {
       const res = await fetch("/api/ai/content", {
@@ -82,19 +107,33 @@ export function ContentStudio() {
         headers: { "Content-Type": "application/json" },
         signal: abortRef.current.signal,
         body: JSON.stringify({
-          type, topic, nicheId: nicheId || undefined, nicheFree: client?.niche,
-          clientName: client?.name, audience: audience || undefined, goal, tone, platform, quantity,
-          extra: extra || undefined,
+          type, topic, nicheId: nicheId || undefined, clientId: clientId || undefined,
+          audience: audience || undefined, goal, tone, platform, quantity, extra: extra || undefined,
         }),
       });
       const full = await readTextStream(res, setOutput);
-      if (full.trim()) saveHistory({ id: crypto.randomUUID(), type, topic, output: full, at: new Date().toLocaleString("pt-BR") });
+      if (full.trim() && !full.includes("> ❌")) {
+        setJustFinished(true);
+        router.refresh(); // traz a geração recém-salva para o histórico
+      }
     } catch (err) {
       if ((err as Error).name !== "AbortError") setError((err as Error).message);
     } finally {
       setLoading(false);
     }
   }
+
+  const saveToCalendar = () => {
+    setCalMsg(null);
+    startSaving(async () => {
+      const r = await saveGenerationToCalendarAction({
+        generationId: activeGenId ?? undefined, clientId: calClient || clientId, title: topic,
+        format: FORMAT_FOR[type], date: calDate, text: output,
+      });
+      if (r.error) setCalMsg(r.error);
+      else { setCalMsg("✓ Salvo no calendário"); setCalOpen(false); }
+    });
+  };
 
   const copy = async () => {
     await navigator.clipboard.writeText(output);
@@ -147,7 +186,7 @@ export function ContentStudio() {
                   <Label>Cliente</Label>
                   <Select value={clientId} onChange={(e) => onClient(e.target.value)}>
                     <option value="">— Nenhum —</option>
-                    {clients.filter((c) => c.status !== "CHURN").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </Select>
                 </div>
                 <div>
@@ -210,7 +249,7 @@ export function ContentStudio() {
               </CardTitle>
               {output && !loading && (
                 <div className="flex gap-2">
-                  <Button variant="outline" size="sm" disabled title="Disponível na etapa do banco de dados">
+                  <Button variant="outline" size="sm" onClick={() => { setCalClient(clientId); setCalOpen((v) => !v); }}>
                     <CalendarPlus /> Calendário
                   </Button>
                   <Button variant="outline" size="sm" onClick={copy}>
@@ -220,6 +259,25 @@ export function ContentStudio() {
               )}
             </CardHeader>
             <CardContent>
+              {calOpen && (
+                <div className="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
+                  <div className="min-w-40 flex-1">
+                    <Label>Cliente</Label>
+                    <Select value={calClient} onChange={(e) => setCalClient(e.target.value)}>
+                      <option value="">— Escolha —</option>
+                      {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </Select>
+                  </div>
+                  <div>
+                    <Label>Publicar em</Label>
+                    <Input type="date" value={calDate} onChange={(e) => setCalDate(e.target.value)} />
+                  </div>
+                  <Button size="sm" onClick={saveToCalendar} disabled={saving || !calClient}>
+                    {saving ? <Loader2 className="animate-spin" /> : <CalendarPlus />} Salvar como &quot;Roteiro&quot;
+                  </Button>
+                </div>
+              )}
+              {calMsg && <p className={cn("mb-3 text-sm", calMsg.startsWith("✓") ? "text-success" : "text-danger")}>{calMsg}</p>}
               {output ? (
                 <Markdown>{output}</Markdown>
               ) : (
@@ -237,11 +295,12 @@ export function ContentStudio() {
             <Card>
               <CardHeader><CardTitle className="flex items-center gap-2"><History className="h-4 w-4" /> Histórico recente</CardTitle></CardHeader>
               <CardContent className="space-y-1">
-                {history.slice(0, 8).map((h) => (
-                  <button key={h.id} onClick={() => setOutput(h.output)}
+                {history.map((h) => (
+                  <button key={h.id} onClick={() => { setOutput(h.output); setActiveGenId(h.id); setType(h.type); setTopic(h.topic); if (h.clientId) setClientId(h.clientId); setCalMsg(null); }}
                     className="flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent">
                     <span className="truncate">
                       <span className="mr-2 font-mono text-[10px] uppercase text-primary">{h.type}</span>{h.topic}
+                      {h.client && <span className="ml-2 text-xs text-muted-foreground">· {h.client}</span>}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">{h.at}</span>
                   </button>

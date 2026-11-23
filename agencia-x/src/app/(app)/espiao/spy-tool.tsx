@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  Activity, AtSign, Clock, Crosshair, Flame, Lightbulb, ListChecks, Loader2, Radar, Target, TrendingUp, Users, Wand2,
+  Activity, AtSign, History, Clock, Crosshair, Flame, Lightbulb, ListChecks, Loader2, Radar, Target, TrendingUp, Users, Wand2,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -11,9 +12,10 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { JarvisOrb } from "@/components/jarvis/jarvis-orb";
 import type { SpyReport } from "@/lib/ai/prompts/spy";
 import type { ScrapedProfile } from "@/lib/apify";
-import { clients } from "@/lib/mock-data";
+import type { ClientOption } from "@/server/queries";
 
 type Result = { report: SpyReport; profile: ScrapedProfile | null; dataSource: "apify" | "manual" | "estimated"; warning?: string };
+export type PastAnalysis = { id: string; handle: string; clientId: string | null; client: string | null; at: string; result: Result };
 
 const SOURCE = {
   apify: { label: "Dados reais coletados", variant: "success" },
@@ -25,7 +27,8 @@ const STEPS = ["Localizando perfil…", "Coletando posts recentes…", "Mapeando
 
 const fmt = (n?: number | null) => (n == null ? "—" : n.toLocaleString("pt-BR"));
 
-export function SpyTool({ liveData }: { liveData: boolean }) {
+export function SpyTool({ liveData, clients, past }: { liveData: boolean; clients: ClientOption[]; past: PastAnalysis[] }) {
+  const router = useRouter();
   const [handle, setHandle] = useState("");
   const [niche, setNiche] = useState("");
   const [clientId, setClientId] = useState("");
@@ -51,13 +54,14 @@ export function SpyTool({ liveData }: { liveData: boolean }) {
         body: JSON.stringify({
           handle: handle.trim(),
           niche: niche || client?.niche || undefined,
-          clientContext: client ? `${client.name} (${client.niche}, ${client.instagram})` : undefined,
+          clientId: client?.id,
           manualNotes: notes || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Falha na análise");
       setResult(data);
+      router.refresh(); // atualiza a lista de análises salvas
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -97,7 +101,7 @@ export function SpyTool({ liveData }: { liveData: boolean }) {
               <Label>Analisar para o cliente</Label>
               <Select value={clientId} onChange={(e) => setClientId(e.target.value)}>
                 <option value="">— Nenhum —</option>
-                {clients.filter((c) => c.status === "ACTIVE").map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {clients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </Select>
             </div>
             <div>
@@ -118,6 +122,26 @@ export function SpyTool({ liveData }: { liveData: boolean }) {
           {error && <p className="mt-3 text-sm text-danger">{error}</p>}
         </CardContent>
       </Card>
+
+      {/* Análises salvas: reabrir não gasta crédito */}
+      {past.length > 0 && !loading && (
+        <Card>
+          <CardHeader><CardTitle className="flex items-center gap-2"><History className="h-4 w-4" /> Análises salvas</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {past.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => { setResult(p.result); setHandle(p.handle); setClientId(p.clientId ?? ""); setError(null); }}
+                className="rounded-md border border-border bg-muted/30 px-3 py-1.5 text-left text-xs transition hover:border-primary/50"
+              >
+                <span className="font-medium text-foreground">@{p.handle}</span>
+                {p.client && <span className="text-muted-foreground"> · {p.client}</span>}
+                <span className="block text-[10px] text-muted-foreground">{p.at}</span>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Carregando: efeito de varredura */}
       {loading && (
@@ -217,7 +241,7 @@ export function SpyTool({ liveData }: { liveData: boolean }) {
                   <p className="text-sm text-primary">“{idea.gancho}”</p>
                   <p className="mt-1 text-xs text-muted-foreground">{idea.por_que}</p>
                   <Link
-                    href={`/conteudo?topic=${encodeURIComponent(`${idea.titulo} — gancho: ${idea.gancho}`)}`}
+                    href={`/conteudo?topic=${encodeURIComponent(`${idea.titulo} — gancho: ${idea.gancho}`)}${clientId ? `&client=${clientId}` : ""}`}
                     className={buttonVariants({ variant: "outline", size: "sm", className: "mt-3" })}
                   >
                     <Wand2 /> Gerar roteiro
