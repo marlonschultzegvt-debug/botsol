@@ -19,6 +19,9 @@ export const authConfig = {
       const user = auth?.user;
       const isPublic = PUBLIC.some((p) => pathname.startsWith(p));
 
+      // Agendador do publicador: sem sessão, autenticado pelo CRON_SECRET dentro da própria rota.
+      if (pathname.startsWith("/api/cron/")) return true;
+
       if (!user) {
         // APIs respondem 401 em JSON (redirecionar um POST para a página de login não faz sentido).
         if (pathname.startsWith("/api/")) return Response.json({ error: "Faça login novamente." }, { status: 401 });

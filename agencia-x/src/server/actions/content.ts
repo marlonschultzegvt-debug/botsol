@@ -41,6 +41,11 @@ export async function saveContentAction(id: string | null, input: ContentInput):
   if (id) {
     const res = await db.contentPiece.updateMany({ where: { id, agencyId: user.agencyId }, data });
     if (!res.count) return { error: "Conteúdo não encontrado." };
+    // Falhou ao publicar e a equipe corrigiu/salvou de novo → volta para a fila do publicador.
+    await db.contentPiece.updateMany({
+      where: { id, agencyId: user.agencyId, publishStatus: "FAILED" },
+      data: { publishStatus: "NONE", publishError: null, publishAttempts: 0 },
+    });
     refresh();
     return { id };
   }

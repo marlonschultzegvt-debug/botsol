@@ -5,13 +5,14 @@
  */
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Loader2, Plus, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2, Plus, Send, Trash2, Upload, X } from "lucide-react";
 import type { ContentFormat, ContentStatus, Platform } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { CONTENT_STATUS } from "@/components/clients/status";
 import { deleteContentAction, moveContentAction, saveContentAction } from "@/server/actions/content";
+import { publishNowAction } from "@/server/actions/instagram";
 import { cn } from "@/lib/utils";
 
 export type BoardPiece = {
@@ -19,6 +20,14 @@ export type BoardPiece = {
   status: ContentStatus; scheduledAt: string; script: string | null; caption: string | null;
   /** Respostas do cliente no portal (mais recentes primeiro). */
   approvals?: { decision: "PENDING" | "APPROVED" | "CHANGES_REQUESTED"; comment: string | null; by: string; at: string }[];
+  /** Mídia anexada (vai para o Instagram). */
+  assets?: { id: string; fileName: string; mimeType: string; sizeBytes: number }[];
+  publish?: {
+    status: "NONE" | "PROCESSING" | "PUBLISHED" | "FAILED";
+    error: string | null;
+    url: string | null;
+    ig: { username: string; auto: boolean } | null;
+  };
 };
 
 const FORMATS: Record<ContentFormat, string> = { REELS: "Reels", CAROUSEL: "Carrossel", STATIC: "Post", STORIES: "Stories", SHORTS: "Shorts" };
@@ -310,6 +319,10 @@ export function CalendarBoard({
                   ))}
                 </div>
               )}
+              {draft.id && (() => {
+                const live = items.find((x) => x.id === draft.id);
+                return live ? <PublishPanel piece={live} canEdit={canEdit} onChanged={() => router.refresh()} /> : null;
+              })()}
               <div><Label>Roteiro</Label><Textarea value={draft.script ?? ""} onChange={(e) => setDraft({ ...draft, script: e.target.value })} className="min-h-[160px] font-mono text-xs" /></div>
               <div><Label>Legenda</Label><Textarea value={draft.caption ?? ""} onChange={(e) => setDraft({ ...draft, caption: e.target.value })} className="min-h-[90px]" /></div>
             </fieldset>
@@ -341,8 +354,124 @@ function Chip({ p, big, canEdit, onOpen }: { p: BoardPiece; big?: boolean; canEd
       className={cn("block w-full rounded border px-1.5 py-1 text-left text-[11px] leading-tight transition hover:brightness-125", CONTENT_STATUS[p.status].cls, canEdit && "cursor-grab active:cursor-grabbing")}
       title={`${p.title} — ${p.client}`}
     >
-      <span className="block truncate font-medium">{p.title}</span>
+      <span className="block truncate font-medium">
+        {p.publish?.status === "PUBLISHED" && <span title="Publicado no Instagram">✓ </span>}
+        {p.publish?.status === "PROCESSING" && <span title="Publicando…">⏳ </span>}
+        {p.publish?.status === "FAILED" && <span title="Falhou ao publicar" className="text-danger">⚠ </span>}
+        {p.title}
+      </span>
       <span className="block truncate opacity-75">{big ? `${timeOf(p.scheduledAt)} · ${FORMATS[p.format]} · ` : ""}{p.client}</span>
     </button>
+  );
+}
+
+/**
+ * Publicação no Instagram dentro do editor: mídia anexada, status e "Publicar agora".
+ * Fica fora do CalendarBoard pelo mesmo motivo do Chip (não recriar a cada render).
+ */
+function PublishPanel({ piece, canEdit, onChanged }: { piece: BoardPiece; canEdit: boolean; onChanged: () => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const pub = piece.publish;
+  const assets = piece.assets ?? [];
+  const accept = piece.format === "REELS" || piece.format === "SHORTS" ? "video/*" : piece.format === "STORIES" ? "video/*,image/jpeg" : "image/jpeg";
+
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setMsg(null);
+    for (const f of Array.from(files)) {
+      setBusy(`Enviando ${f.name}…`);
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("clientId", piece.clientId);
+      fd.append("contentPieceId", piece.id);
+      const res = await fetch("/api/assets", { method: "POST", body: fd });
+      if (!res.ok) setMsg({ text: ((await res.json().catch(() => ({}))) as { error?: string }).error ?? "Falha no envio.", ok: false });
+    }
+    setBusy(null);
+    onChanged();
+  };
+
+  const remove = async (id: string) => {
+    setBusy("Removendo…");
+    await fetch(`/api/assets/${id}`, { method: "DELETE" });
+    setBusy(null);
+    onChanged();
+  };
+
+  const publishNow = async () => {
+    setBusy("Publicando…");
+    setMsg(null);
+    const r = await publishNowAction(piece.id);
+    setBusy(null);
+    setMsg({ text: r.error ?? r.info ?? "Feito.", ok: !r.error });
+    onChanged();
+  };
+
+  const badge =
+    pub?.status === "PUBLISHED" ? { t: "Publicado", c: "text-success border-success/40 bg-success/10" }
+    : pub?.status === "PROCESSING" ? { t: "Publicando…", c: "text-sky-300 border-sky-400/40 bg-sky-400/10" }
+    : pub?.status === "FAILED" ? { t: "Falhou", c: "text-danger border-danger/40 bg-danger/10" }
+    : piece.status === "APPROVED" && pub?.ig?.auto ? { t: "Agendado", c: "text-primary border-primary/40 bg-primary/10" }
+    : null;
+
+  return (
+    <div className="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="hud-label">Publicação no Instagram</p>
+        {badge && <span className={cn("rounded border px-2 py-0.5 text-[11px]", badge.c)}>{badge.t}</span>}
+      </div>
+
+      {!pub?.ig ? (
+        <p className="text-xs text-muted-foreground">
+          O cliente ainda não tem Instagram conectado. Conecte na <a className="text-primary underline" href={`/clientes/${piece.clientId}`}>ficha do cliente</a>.
+        </p>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Vai para <b className="text-foreground">@{pub.ig.username}</b>.{" "}
+          {pub.ig.auto
+            ? piece.status === "APPROVED" ? "Publica sozinho no horário agendado." : "Publica sozinho quando estiver Aprovado e chegar o horário."
+            : "Publicação automática pausada para este cliente."}
+        </p>
+      )}
+
+      {pub?.status === "PUBLISHED" && pub.url && (
+        <a href={pub.url} target="_blank" rel="noreferrer" className="block text-xs text-primary underline">Ver post no Instagram ↗</a>
+      )}
+      {pub?.error && pub.status !== "PUBLISHED" && <p className="text-xs text-danger">{pub.error}</p>}
+
+      <div className="space-y-1.5">
+        {assets.length === 0 && <p className="text-xs text-muted-foreground">Nenhuma mídia anexada.</p>}
+        {assets.map((a) => (
+          <div key={a.id} className="flex items-center gap-2 text-xs">
+            <span>{a.mimeType.startsWith("video/") ? "🎬" : "🖼️"}</span>
+            <a href={`/api/assets/${a.id}`} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:text-primary">{a.fileName}</a>
+            <span className="font-mono text-muted-foreground">{a.sizeBytes >= 1048576 ? `${(a.sizeBytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(a.sizeBytes / 1024))} KB`}</span>
+            {canEdit && pub?.status !== "PUBLISHED" && (
+              <button type="button" onClick={() => remove(a.id)} className="text-muted-foreground hover:text-danger" aria-label={`Remover ${a.fileName}`}><X className="h-3.5 w-3.5" /></button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {canEdit && pub?.status !== "PUBLISHED" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-md border border-border px-3 text-xs hover:bg-accent">
+            <Upload className="h-3.5 w-3.5" /> Anexar mídia
+            <input type="file" multiple accept={accept} className="hidden" onChange={(e) => { void upload(e.target.files); e.target.value = ""; }} data-testid="media-input" />
+          </label>
+          {pub?.ig && (
+            <Button type="button" size="sm" onClick={publishNow} disabled={!!busy || pub.status === "PROCESSING"}>
+              <Send /> Publicar agora
+            </Button>
+          )}
+          {busy && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" />{busy}</span>}
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        {piece.format === "REELS" || piece.format === "SHORTS" ? "Reels: 1 vídeo MP4/MOV vertical." : piece.format === "CAROUSEL" ? "Carrossel: 2 a 20 imagens JPG, na ordem de envio." : piece.format === "STORIES" ? "Stories: 1 vídeo ou imagem JPG." : "Post: 1 imagem JPG."} A legenda do campo abaixo vai junto.
+      </p>
+      {msg && <p className={cn("text-xs", msg.ok ? "text-success" : "text-danger")}>{msg.text}</p>}
+    </div>
   );
 }

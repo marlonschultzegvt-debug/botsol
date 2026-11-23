@@ -46,6 +46,7 @@ model Agency {
   briefingTemplates BriefingTemplate[]
   invoices       Invoice[]
   jarvisThreads  JarvisThread[]
+  instagramAccounts InstagramAccount[]
 }
 
 enum Role {
@@ -127,6 +128,7 @@ model Client {
   tasks        Task[]
   portalUsers  Membership[]
   aiGenerations AiGeneration[]
+  igAccount    InstagramAccount?
 
   @@index([agencyId, status])
 }
@@ -280,6 +282,13 @@ model ContentPiece {
   dueAt       DateTime? // prazo interno
   publishedUrl String?
   aiGenerationId String? // de qual geração da IA veio
+  // Publicação automática no Instagram
+  publishStatus  PublishStatus @default(NONE)
+  publishError   String?
+  igContainerId  String? // contêiner criado na Meta, aguardando processamento
+  igMediaId      String? // post publicado
+  publishedAt    DateTime?
+  publishAttempts Int     @default(0)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
@@ -489,4 +498,35 @@ model JarvisMessage {
   createdAt DateTime @default(now())
 
   thread JarvisThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════ Instagram (publicação automática) ═══════════════════
+
+enum PublishStatus {
+  NONE // não tentou publicar
+  PROCESSING // contêiner criado, Meta processando a mídia
+  PUBLISHED
+  FAILED
+}
+
+/// Conta profissional do Instagram conectada (Business Login for Instagram).
+/// Um Instagram por cliente. O token fica CRIPTOGRAFADO (AES-256-GCM).
+model InstagramAccount {
+  id                String   @id @default(cuid())
+  agencyId          String
+  clientId          String   @unique
+  igUserId          String
+  username          String
+  profilePictureUrl String?
+  accessTokenEnc    String
+  tokenExpiresAt    DateTime
+  autoPublish       Boolean  @default(true) // interruptor "pausar publicações"
+  lastError         String?
+  connectedAt       DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId])
 }

@@ -10,6 +10,8 @@ import {
   addInvoiceAction, addNoteAction, deleteClientAction, deleteNoteAction, setInvoiceStatusAction,
 } from "@/server/actions/clients";
 import { createPortalAccessAction, revokePortalAccessAction } from "@/server/actions/ops";
+import { disconnectInstagramAction, setAutoPublishAction } from "@/server/actions/instagram";
+import { TZ } from "@/lib/utils";
 import { NOTE_TYPE } from "./status";
 
 export function NoteForm({ clientId }: { clientId: string }) {
@@ -141,6 +143,82 @@ export function PortalAccess({ clientId, users }: { clientId: string; users: { i
         <Button size="sm" variant="outline" disabled={pending || !name || !email} onClick={() => create(name, email)}>Criar acesso ao portal</Button>
         {error && <p className="text-xs text-danger">{error}</p>}
       </div>
+    </div>
+  );
+}
+
+/** Cartão do Instagram na ficha do cliente: conectar, pausar publicações, desconectar. */
+export function InstagramCard({
+  clientId, account, configured, notice,
+}: {
+  clientId: string;
+  configured: boolean;
+  account: { username: string; profilePictureUrl: string | null; autoPublish: boolean; tokenExpiresAt: string; lastError: string | null } | null;
+  notice?: { kind: "ok" | "erro"; text: string } | null;
+}) {
+  const [pending, start] = useTransition();
+  const connect = `/api/instagram/connect?client=${clientId}`;
+
+  return (
+    <div className="space-y-3">
+      {notice && (
+        <p className={notice.kind === "ok" ? "rounded-md border border-success/40 bg-success/10 p-2 text-xs text-success" : "rounded-md border border-danger/40 bg-danger/10 p-2 text-xs text-danger"}>
+          {notice.text}
+        </p>
+      )}
+      {!configured ? (
+        <p className="text-sm text-muted-foreground">
+          O app da Meta ainda não foi configurado no sistema (variáveis INSTAGRAM_APP_ID e INSTAGRAM_APP_SECRET). Siga o guia de ativação.
+        </p>
+      ) : !account ? (
+        <>
+          <p className="text-sm text-muted-foreground">Conecte a conta <b>profissional</b> do Instagram deste cliente para publicar automaticamente os conteúdos aprovados.</p>
+          <a href={connect} className="inline-flex h-9 items-center gap-2 rounded-md bg-gradient-to-r from-fuchsia-500 via-pink-500 to-amber-400 px-4 text-sm font-semibold text-white">
+            Conectar Instagram
+          </a>
+        </>
+      ) : (
+        <>
+          <div className="flex items-center gap-3">
+            {account.profilePictureUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={account.profilePictureUrl} alt="" className="h-10 w-10 rounded-full border border-border object-cover" />
+            ) : (
+              <span className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-fuchsia-500 to-amber-400 text-sm font-bold text-white">IG</span>
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium">@{account.username}</p>
+              <p className="text-xs text-muted-foreground">Acesso válido até {new Date(account.tokenExpiresAt).toLocaleDateString("pt-BR", { timeZone: TZ })} · renova sozinho</p>
+            </div>
+          </div>
+          {account.lastError && <p className="text-xs text-danger">{account.lastError}</p>}
+          <label className="flex items-center justify-between gap-3 rounded-md border border-border p-2.5 text-sm">
+            <span>
+              Publicar automaticamente
+              <span className="block text-xs text-muted-foreground">Conteúdos <b>Aprovados</b> com mídia vão ao ar no horário agendado.</span>
+            </span>
+            <input
+              type="checkbox"
+              checked={account.autoPublish}
+              disabled={pending}
+              onChange={(e) => start(() => setAutoPublishAction(clientId, e.target.checked))}
+              className="h-5 w-5 accent-[hsl(var(--primary))]"
+            />
+          </label>
+          <div className="flex gap-2">
+            <a href={connect} className="inline-flex h-8 items-center rounded-md border border-border px-3 text-xs hover:bg-accent">Reconectar</a>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="text-danger"
+              disabled={pending}
+              onClick={() => confirm(`Desconectar @${account.username}? As publicações automáticas param.`) && start(() => disconnectInstagramAction(clientId))}
+            >
+              Desconectar
+            </Button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

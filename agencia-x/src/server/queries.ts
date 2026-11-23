@@ -107,6 +107,21 @@ export async function agencySnapshotForAI(agencyId: string, opts: { finance: boo
     take: 10,
   });
   const fmt = (x: Date) => x.toLocaleDateString("pt-BR");
+  // Publicação automática no Instagram: próximas 48h, falhas e publicados nas últimas 24h.
+  const now = new Date();
+  const [igQueue, igFailed, igDone] = await Promise.all([
+    db.contentPiece.findMany({
+      where: { agencyId, status: "APPROVED", publishStatus: { in: ["NONE", "PROCESSING"] }, scheduledAt: { lte: new Date(now.getTime() + 2 * 864e5) }, client: { igAccount: { isNot: null } } },
+      select: { title: true, scheduledAt: true, client: { select: { name: true } } }, orderBy: { scheduledAt: "asc" }, take: 8,
+    }),
+    db.contentPiece.findMany({ where: { agencyId, publishStatus: "FAILED" }, select: { title: true, publishError: true, client: { select: { name: true } } }, take: 5 }),
+    db.contentPiece.count({ where: { agencyId, publishStatus: "PUBLISHED", publishedAt: { gte: new Date(now.getTime() - 864e5) } } }),
+  ]);
+  const igLines = [
+    `Instagram: ${igDone} publicado(s) nas últimas 24h.`,
+    `Fila de publicação (48h): ${igQueue.map((p) => `${p.title} - ${p.client.name} - ${p.scheduledAt ? p.scheduledAt.toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }) : "sem data"}`).join("; ") || "vazia"}.`,
+    igFailed.length ? `Publicações com ERRO: ${igFailed.map((p) => `${p.title} (${p.client.name}): ${p.publishError}`).join("; ")}.` : "",
+  ];
   // Sem permissão financeira, o assistente não recebe valores (não pode vazar o que a tela esconde).
   const money = opts.finance;
   const deadlines = money ? d.deadlines : d.deadlines.filter((x) => x.kind !== "Financeiro");
@@ -121,6 +136,7 @@ export async function agencySnapshotForAI(agencyId: string, opts: { finance: boo
     `Próximos prazos: ${deadlines.map((x) => `${x.title} - ${x.client} - ${fmt(x.date)} (${x.kind}${x.late ? ", ATRASADO" : ""})`).join("; ")}.`,
     `Campanhas: ${d.campaigns.map((c) => `${c.name} (${c.client}) ${c.progress}% entregue`).join("; ")}.`,
     money && `Faturamento por mês: ${d.revenue.map((r) => `${r.month} faturado R$${r.faturado} recebido R$${r.recebido}`).join("; ")}.`,
+    ...igLines,
     `Tarefas abertas: ${tasks.map((t) => `${t.title} [${t.status}, ${t.priority}] ${t.assignee?.name ?? "sem responsável"}${t.dueDate ? ` até ${fmt(t.dueDate)}` : ""}`).join("; ")}.`,
   ]
     .filter(Boolean)
@@ -175,6 +191,7 @@ export async function getClient(agencyId: string, id: string) {
       contracts: { include: { service: { select: { name: true } }, deliverables: { orderBy: { dueDate: "asc" } } } },
       competitors: { include: { snapshots: { orderBy: { createdAt: "desc" }, take: 1 } } },
       portalUsers: { where: { role: "CLIENT" }, include: { user: { select: { id: true, name: true, email: true } } } },
+      igAccount: { select: { username: true, profilePictureUrl: true, autoPublish: true, tokenExpiresAt: true, lastError: true, connectedAt: true } },
     },
   });
   if (!c) return null;
@@ -194,8 +211,9 @@ export async function listContentInRange(agencyId: string, from: Date, to: Date,
   return db.contentPiece.findMany({
     where: { agencyId, clientId: clientId || undefined, scheduledAt: { gte: from, lt: to } },
     include: {
-      client: { select: { id: true, name: true } },
+      client: { select: { id: true, name: true, igAccount: { select: { username: true, autoPublish: true } } } },
       approvals: { orderBy: { createdAt: "desc" }, take: 3, include: { reviewer: { select: { name: true } } } },
+      assets: { select: { id: true, fileName: true, mimeType: true, sizeBytes: true }, orderBy: { createdAt: "asc" } },
     },
     orderBy: { scheduledAt: "asc" },
   });

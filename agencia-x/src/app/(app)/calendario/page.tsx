@@ -47,6 +47,13 @@ export default async function CalendarPage({
     id: p.id, title: p.title, clientId: p.clientId, client: p.client.name, format: p.format, platform: p.platform,
     status: p.status, scheduledAt: p.scheduledAt!.toISOString(), script: p.script, caption: p.caption,
     approvals: p.approvals.map((a) => ({ decision: a.decision, comment: a.comment, by: a.reviewer.name, at: a.createdAt.toISOString() })),
+    assets: p.assets,
+    publish: {
+      status: p.publishStatus,
+      error: p.publishError,
+      url: p.publishedUrl,
+      ig: p.client.igAccount ? { username: p.client.igAccount.username, auto: p.client.igAccount.autoPublish } : null,
+    },
   }));
 
   return (

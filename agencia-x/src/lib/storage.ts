@@ -58,6 +58,22 @@ export async function signedUrl(key: string, downloadName: string): Promise<stri
   return `${SB_URL}/storage/v1${signedURL}&download=${encodeURIComponent(downloadName)}`;
 }
 
+/**
+ * Link público temporário para um serviço externo buscar o arquivo (ex.: a Meta baixa a mídia
+ * para publicar no Instagram). Só existe com Supabase Storage: arquivo local não tem URL pública.
+ */
+export async function publicTempUrl(key: string, seconds = 3600): Promise<string | null> {
+  if (storageMode() !== "supabase") return null;
+  const res = await fetch(`${SB_URL}/storage/v1/object/sign/${BUCKET}/${key}`, {
+    method: "POST",
+    headers: { ...sbHeaders(), "Content-Type": "application/json" },
+    body: JSON.stringify({ expiresIn: seconds }),
+  });
+  if (!res.ok) throw new Error(`Supabase Storage respondeu ${res.status}`);
+  const { signedURL } = (await res.json()) as { signedURL: string };
+  return `${SB_URL}/storage/v1${signedURL}`;
+}
+
 export async function readLocal(key: string) {
   const file = path.join(LOCAL_DIR, key);
   if (!file.startsWith(LOCAL_DIR + path.sep)) throw new Error("Caminho inválido");

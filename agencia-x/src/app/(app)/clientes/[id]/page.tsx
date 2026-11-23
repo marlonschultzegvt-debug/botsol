@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ClientForm } from "@/components/clients/client-form";
 import {
-  DeleteClientButton, DeleteNoteButton, InvoiceForm, InvoiceStatusSelect, NoteForm, PortalAccess,
+  DeleteClientButton, DeleteNoteButton, InvoiceForm, InvoiceStatusSelect, NoteForm, PortalAccess, InstagramCard,
 } from "@/components/clients/client-widgets";
 import { CLIENT_STATUS, CONTENT_STATUS, NOTE_TYPE, PAYMENT_STATUS } from "@/components/clients/status";
 import { can, requireUser } from "@/lib/session";
+import { igConfigured } from "@/lib/instagram";
 import { updateClientAction } from "@/server/actions/clients";
 import { getClient } from "@/server/queries";
 import { brl, cn } from "@/lib/utils";
@@ -22,9 +23,21 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   return { title: c?.name ?? "Cliente" };
 }
 
-export default async function ClientPage({ params }: { params: Promise<{ id: string }> }) {
+const IG_NOTICE: Record<string, { kind: "ok" | "erro"; text: string }> = {
+  conectado: { kind: "ok", text: "Instagram conectado! Conteúdos aprovados com mídia serão publicados no horário." },
+  cancelado: { kind: "erro", text: "Conexão cancelada no Instagram." },
+  expirou: { kind: "erro", text: "O login demorou demais ou a sessão mudou. Toque em Conectar de novo." },
+  "nao-configurado": { kind: "erro", text: "O app da Meta ainda não foi configurado no sistema." },
+  "sem-permissao": { kind: "erro", text: "Só Admin ou Gestor podem conectar o Instagram." },
+};
+
+export default async function ClientPage({
+  params, searchParams,
+}: { params: Promise<{ id: string }>; searchParams: Promise<{ ig?: string; igmsg?: string }> }) {
   const user = await requireUser();
   const c = await getClient(user.agencyId, (await params).id);
+  const sp = await searchParams;
+  const igNotice = sp.ig === "erro" ? { kind: "erro" as const, text: `Não foi possível conectar: ${sp.igmsg ?? "erro desconhecido"}` } : sp.ig ? IG_NOTICE[sp.ig] ?? null : null;
   if (!c) notFound();
 
   const canEdit = can(user.role, "clients:write");
@@ -189,6 +202,20 @@ export default async function ClientPage({ params }: { params: Promise<{ id: str
               </ol>
             </CardContent>
           </Card>
+
+          {canEdit && (
+            <Card id="conta-instagram">
+              <CardHeader><CardTitle>Instagram</CardTitle></CardHeader>
+              <CardContent>
+                <InstagramCard
+                  clientId={c.id}
+                  configured={igConfigured()}
+                  notice={igNotice}
+                  account={c.igAccount ? { ...c.igAccount, tokenExpiresAt: c.igAccount.tokenExpiresAt.toISOString() } : null}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {canEdit && (
             <Card>
