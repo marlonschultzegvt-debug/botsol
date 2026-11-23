@@ -1,0 +1,492 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Agência X — Modelagem do banco (PostgreSQL / Supabase)
+//
+// Multi-tenant: TODA tabela de negócio carrega `agencyId`. Uma instalação
+// atende várias agências (modelo SaaS) e cada consulta filtra pela agência
+// do usuário logado.
+// ─────────────────────────────────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═════════════════════════ Núcleo: agência e usuários ═══════════════════════
+
+enum Plan {
+  STARTER
+  PRO
+  AGENCY
+}
+
+model Agency {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  logoUrl      String?
+  primaryColor String   @default("#22d3ee") // personalização da marca
+  accentColor  String   @default("#a78bfa")
+  plan         Plan     @default(STARTER)
+  aiCredits    Int      @default(500) // limite de gerações/mês por plano
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  members        Membership[]
+  clients        Client[]
+  services       Service[]
+  contents       ContentPiece[]
+  aiGenerations  AiGeneration[]
+  promptTemplates PromptTemplate[]
+  competitors    Competitor[]
+  tasks          Task[]
+  briefingTemplates BriefingTemplate[]
+  invoices       Invoice[]
+  jarvisThreads  JarvisThread[]
+}
+
+enum Role {
+  ADMIN
+  MANAGER // Gestor
+  WRITER // Redator
+  EDITOR // Editor de vídeo/design
+  CLIENT // acesso ao Portal do Cliente
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String?
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+
+  memberships   Membership[]
+  assignedTasks Task[]         @relation("TaskAssignee")
+  notes         ClientNote[]
+  approvals     Approval[]
+  aiGenerations AiGeneration[]
+  uploads       Asset[]
+  jarvisThreads JarvisThread[]
+}
+
+/// Um usuário pode pertencer a várias agências com papéis diferentes.
+/// Usuários com papel CLIENT ficam vinculados a um Client específico.
+model Membership {
+  id       String  @id @default(cuid())
+  userId   String
+  agencyId String
+  role     Role
+  clientId String? // obrigatório quando role = CLIENT
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  agency Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client Client? @relation(fields: [clientId], references: [id])
+
+  @@unique([userId, agencyId])
+}
+
+// ═════════════════════════════ Clientes (CRM) ════════════════════════════════
+
+enum ClientStatus {
+  ACTIVE
+  PAUSED
+  CHURN
+  LEAD
+}
+
+model Client {
+  id           String       @id @default(cuid())
+  agencyId     String
+  name         String
+  niche        String // ex: "Odontologia", "Moda feminina"
+  instagram    String?
+  tiktok       String?
+  website      String?
+  goals        String? // objetivos (texto livre)
+  brandVoice   String? // tom de voz -> usado nos prompts da IA
+  targetAudience String?
+  avgTicket    Decimal?     @db.Decimal(10, 2) // ticket médio do cliente final
+  monthlyFee   Decimal?     @db.Decimal(10, 2) // quanto paga à agência
+  status       ClientStatus @default(ACTIVE)
+  startedAt    DateTime     @default(now())
+  churnedAt    DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  agency       Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  notes        ClientNote[]
+  contracts    ClientService[]
+  contents     ContentPiece[]
+  invoices     Invoice[]
+  assets       Asset[]
+  competitors  Competitor[]
+  tasks        Task[]
+  portalUsers  Membership[]
+  aiGenerations AiGeneration[]
+
+  @@index([agencyId, status])
+}
+
+enum NoteType {
+  NOTE
+  CALL
+  MEETING
+  WHATSAPP
+  EMAIL
+}
+
+/// Histórico de interações com o cliente.
+model ClientNote {
+  id        String   @id @default(cuid())
+  clientId  String
+  authorId  String
+  type      NoteType @default(NOTE)
+  body      String
+  createdAt DateTime @default(now())
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  author User   @relation(fields: [authorId], references: [id])
+
+  @@index([clientId, createdAt])
+}
+
+// ═══════════════════════ Serviços, campanhas e financeiro ════════════════════
+
+/// Catálogo de pacotes da agência (Gestão de Instagram, Tráfego Pago...).
+model Service {
+  id           String  @id @default(cuid())
+  agencyId     String
+  name         String
+  description  String?
+  price        Decimal @db.Decimal(10, 2)
+  billingCycle String  @default("MONTHLY") // MONTHLY | ONE_TIME
+  deliverables Json? // ex: [{ "tipo": "reels", "qtd": 8 }, { "tipo": "carrossel", "qtd": 4 }]
+  active       Boolean @default(true)
+
+  agency    Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  contracts ClientService[]
+}
+
+enum CampaignStatus {
+  PLANNING
+  RUNNING
+  PAUSED
+  DONE
+}
+
+/// Contrato/campanha: um serviço vendido a um cliente.
+model ClientService {
+  id        String         @id @default(cuid())
+  clientId  String
+  serviceId String
+  name      String? // nome da campanha (ex: "Black Friday 2026")
+  status    CampaignStatus @default(PLANNING)
+  price     Decimal        @db.Decimal(10, 2) // preço negociado
+  startDate DateTime
+  endDate   DateTime?
+
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service      Service       @relation(fields: [serviceId], references: [id])
+  deliverables Deliverable[]
+}
+
+enum DeliverableStatus {
+  PENDING
+  IN_PROGRESS
+  DELIVERED
+  LATE
+}
+
+/// Controle de entregas e prazos de cada contrato.
+model Deliverable {
+  id              String            @id @default(cuid())
+  clientServiceId String
+  title           String
+  dueDate         DateTime
+  status          DeliverableStatus @default(PENDING)
+  deliveredAt     DateTime?
+
+  clientService ClientService @relation(fields: [clientServiceId], references: [id], onDelete: Cascade)
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELED
+}
+
+model Invoice {
+  id       String        @id @default(cuid())
+  agencyId String
+  clientId String
+  amount   Decimal       @db.Decimal(10, 2)
+  dueDate  DateTime
+  paidAt   DateTime?
+  status   InvoiceStatus @default(PENDING)
+  reference String? // ex: "Mensalidade 11/2026"
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, status, dueDate])
+}
+
+// ═══════════════════════ Conteúdo + Calendário editorial ═════════════════════
+
+enum Platform {
+  INSTAGRAM
+  TIKTOK
+  YOUTUBE_SHORTS
+  LINKEDIN
+}
+
+enum ContentFormat {
+  REELS
+  CAROUSEL
+  STATIC
+  STORIES
+  SHORTS
+}
+
+/// Pipeline do calendário: IDEA -> SCRIPTED -> FILMED -> EDITED -> (APPROVAL) -> PUBLISHED
+enum ContentStatus {
+  IDEA
+  SCRIPTED
+  FILMED
+  EDITED
+  IN_APPROVAL
+  APPROVED
+  PUBLISHED
+}
+
+/// Uma peça de conteúdo no calendário editorial.
+model ContentPiece {
+  id          String        @id @default(cuid())
+  agencyId    String
+  clientId    String
+  title       String
+  format      ContentFormat
+  platform    Platform      @default(INSTAGRAM)
+  status      ContentStatus @default(IDEA)
+  script      String? // roteiro
+  caption     String? // legenda
+  hashtags    String[]
+  scheduledAt DateTime? // data de publicação planejada
+  dueAt       DateTime? // prazo interno
+  publishedUrl String?
+  aiGenerationId String? // de qual geração da IA veio
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  agency       Agency        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  aiGeneration AiGeneration? @relation(fields: [aiGenerationId], references: [id])
+  approvals    Approval[]
+  assets       Asset[]
+  tasks        Task[]
+
+  @@index([agencyId, scheduledAt])
+  @@index([clientId, status])
+}
+
+enum ApprovalDecision {
+  PENDING
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+/// Aprovação de conteúdo pelo cliente (Portal).
+model Approval {
+  id             String           @id @default(cuid())
+  contentPieceId String
+  reviewerId     String
+  decision       ApprovalDecision @default(PENDING)
+  comment        String?
+  createdAt      DateTime         @default(now())
+
+  contentPiece ContentPiece @relation(fields: [contentPieceId], references: [id], onDelete: Cascade)
+  reviewer     User         @relation(fields: [reviewerId], references: [id])
+}
+
+/// Arquivos (upload do cliente, vídeos brutos, artes). Armazenados no Supabase Storage / S3.
+model Asset {
+  id             String   @id @default(cuid())
+  clientId       String
+  contentPieceId String?
+  uploadedById   String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storageKey     String
+  createdAt      DateTime @default(now())
+
+  client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  contentPiece ContentPiece? @relation(fields: [contentPieceId], references: [id])
+  uploadedBy   User          @relation(fields: [uploadedById], references: [id])
+}
+
+// ═══════════════════════════════ IA ═══════════════════════════════════════════
+
+enum GenerationType {
+  REELS_SCRIPT
+  CAPTION
+  CAROUSEL
+  HOOKS_CTAS
+  BATCH
+  COMPETITOR_REPORT
+  BRIEFING
+}
+
+/// Histórico de TUDO que a IA gerou (auditoria, reuso e controle de créditos).
+model AiGeneration {
+  id           String         @id @default(cuid())
+  agencyId     String
+  userId       String
+  clientId     String?
+  type         GenerationType
+  input        Json // parâmetros do formulário
+  output       String // texto gerado (markdown) ou JSON serializado
+  model        String
+  inputTokens  Int?
+  outputTokens Int?
+  favorite     Boolean        @default(false)
+  templateId   String?
+  createdAt    DateTime       @default(now())
+
+  agency   Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user     User            @relation(fields: [userId], references: [id])
+  client   Client?         @relation(fields: [clientId], references: [id])
+  template PromptTemplate? @relation(fields: [templateId], references: [id])
+  contents ContentPiece[]
+
+  @@index([agencyId, createdAt])
+}
+
+/// Templates de prompt por nicho. agencyId nulo = template global do sistema.
+model PromptTemplate {
+  id          String         @id @default(cuid())
+  agencyId    String?
+  name        String
+  niche       String
+  type        GenerationType
+  instruction String // trecho injetado no prompt do usuário
+  isPublic    Boolean        @default(false)
+
+  agency      Agency?        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  generations AiGeneration[]
+}
+
+// ═══════════════════════ Espião (Competitor Intelligence) ═══════════════════
+
+model Competitor {
+  id        String   @id @default(cuid())
+  agencyId  String
+  clientId  String? // concorrente de qual cliente
+  handle    String // @perfil
+  platform  Platform @default(INSTAGRAM)
+  niche     String?
+  createdAt DateTime @default(now())
+
+  agency    Agency               @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  client    Client?              @relation(fields: [clientId], references: [id])
+  snapshots CompetitorSnapshot[]
+
+  @@unique([agencyId, handle, platform])
+}
+
+/// Foto do perfil em um momento: dados coletados + relatório da IA.
+/// Guardar snapshots permite comparar evolução semana a semana.
+model CompetitorSnapshot {
+  id             String   @id @default(cuid())
+  competitorId   String
+  followers      Int?
+  postsCount     Int?
+  avgLikes       Float?
+  avgComments    Float?
+  engagementRate Float?
+  postsPerWeek   Float?
+  rawData        Json? // resposta do coletor (Apify)
+  report         Json // relatório estruturado gerado pelo Claude
+  dataSource     String // "apify" | "manual" | "estimated"
+  createdAt      DateTime @default(now())
+
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════ Produtividade ═══════════════════════════════════════
+
+enum TaskStatus {
+  TODO
+  DOING
+  REVIEW
+  DONE
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id             String     @id @default(cuid())
+  agencyId       String
+  title          String
+  description    String?
+  status         TaskStatus @default(TODO)
+  priority       Priority   @default(MEDIUM)
+  dueDate        DateTime?
+  assigneeId     String?
+  clientId       String?
+  contentPieceId String?
+  createdAt      DateTime   @default(now())
+
+  agency       Agency        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  assignee     User?         @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  client       Client?       @relation(fields: [clientId], references: [id])
+  contentPiece ContentPiece? @relation(fields: [contentPieceId], references: [id])
+
+  @@index([agencyId, status, dueDate])
+}
+
+/// Templates de briefing (formulário dinâmico em JSON).
+model BriefingTemplate {
+  id       String @id @default(cuid())
+  agencyId String
+  name     String
+  fields   Json // [{ "label": "Público-alvo", "type": "textarea", "required": true }]
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+}
+
+// ═══════════════════════ Assistente Jarvis ═══════════════════════════════════
+
+/// Conversas com o assistente (memória entre sessões).
+model JarvisThread {
+  id        String          @id @default(cuid())
+  agencyId  String
+  userId    String
+  title     String?
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  agency   Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user     User            @relation(fields: [userId], references: [id])
+  messages JarvisMessage[]
+}
+
+model JarvisMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  role      String // "user" | "assistant"
+  content   Json // blocos de conteúdo da API do Claude (preservados como vieram)
+  createdAt DateTime @default(now())
+
+  thread JarvisThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+}
