@@ -23,7 +23,12 @@ export const MAX_UPLOAD_MB = Number(process.env.UPLOAD_MAX_MB ?? (process.env.VE
 
 export const ALLOWED_MIME = /^(image\/|video\/|audio\/|application\/pdf$)/;
 
-const sbHeaders = () => ({ Authorization: `Bearer ${SB_KEY}`, apikey: SB_KEY! });
+/**
+ * Chave antiga (service_role, um JWT "eyJ…") vai em apikey + Authorization.
+ * Chave nova (sb_secret_…) não é JWT: vai só em apikey; o gateway do Supabase cuida do resto.
+ */
+const sbHeaders = (): Record<string, string> =>
+  SB_KEY!.startsWith("eyJ") ? { Authorization: `Bearer ${SB_KEY}`, apikey: SB_KEY! } : { apikey: SB_KEY! };
 
 export async function putObject(key: string, data: Buffer, mimeType: string) {
   if (storageMode() === "supabase") {
