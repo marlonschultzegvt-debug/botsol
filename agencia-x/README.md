@@ -28,13 +28,18 @@ Plataforma para agências de marketing e criadores: **conteúdo com IA (Claude)*
 | Acesso ao portal criado pela ficha do cliente (senha temporária) + "ver como cliente" | ✅ etapa 3 |
 | Geração em Lote, Configurações (marca, equipe) | 🔜 páginas provisórias |
 
-## ✅ O que falta VOCÊ fazer (uma vez, dá para fazer pelo celular)
-1. **Chave do Claude:** crie em console.anthropic.com → API Keys. Vai em `ANTHROPIC_API_KEY`.
-2. **Banco:** crie um projeto grátis no supabase.com → copie a *connection string* para `DATABASE_URL`.
-3. **Arquivos do portal:** no mesmo projeto Supabase → Storage → crie o bucket privado `assets` → copie `SUPABASE_URL` e a `service_role key`.
-4. **Publicar:** em vercel.com → *Add New Project* → importe este repositório → **Root Directory = `agencia-x`** → cole as variáveis do `.env.example` → Deploy.
-5. Depois do primeiro deploy, rode uma vez `npm run db:push` (ou peça ao Claude para rodar).
-6. *(Opcional)* `APIFY_TOKEN` em apify.com para o Espião usar dados reais do Instagram.
+## ✅ Publicação: o que já está feito e o que falta
+**Já feito (23/11/2026):** projeto Supabase `agencia-x` (ref `ibywxlqjmilzdevllntp`) com as 20 tabelas, RLS ligado em todas (bloqueia a API pública; o app acessa direto pelo servidor) e o bucket privado `assets` para os arquivos do portal.
+
+**Falta você pegar (são segredos, só você vê no painel):**
+1. **Chave do Claude:** console.anthropic.com → API Keys → `ANTHROPIC_API_KEY`.
+2. **Conexão do banco:** Supabase → botão *Connect* → **Transaction pooler** (porta 6543) → copie a URI, troque `[YOUR-PASSWORD]` pela senha do banco e acrescente no final `?pgbouncer=true&connection_limit=1` → `DATABASE_URL`.
+3. **Arquivos:** Supabase → Project Settings → API Keys → `service_role` → `SUPABASE_SERVICE_ROLE_KEY`. E `SUPABASE_URL=https://ibywxlqjmilzdevllntp.supabase.co`.
+4. **`AUTH_SECRET`:** qualquer texto longo e aleatório (ex.: gere em 1password.com/password-generator, 40+ caracteres).
+
+**Publicar:** vercel.com → *Add New → Project* → importe `botsol` → **Root Directory = `agencia-x`** → cole as variáveis acima → Deploy. Depois, entre em `/cadastro` para criar sua agência (o banco de produção começa vazio, sem os logins de demonstração).
+
+*(Opcional)* `APIFY_TOKEN` em apify.com para o Espião usar dados reais do Instagram.
 
 ## Rodando localmente
 ```bash
