@@ -4,6 +4,7 @@ import { Ear, EarOff, Mic, Send, Square, Volume2, VolumeX, RotateCcw } from "luc
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { JarvisOrb } from "./jarvis-orb";
+import { MediaPreview, ProposalCard } from "./media-cards";
 import { useJarvisCtx } from "./jarvis-context";
 import { ASSISTANT_NAME, cn } from "@/lib/utils";
 
@@ -11,8 +12,15 @@ const SUGGESTIONS = [
   "Resumo do dia: o que precisa da minha atenção?",
   "Quais clientes estão com pagamento atrasado?",
   "Me dá 5 ideias de Reels para uma clínica odontológica",
-  "Quais ganchos funcionam para loja de roupas?",
+  "Faça um carrossel de 5 slides para um dos meus clientes",
 ];
+
+const TOOL_LABEL: Record<string, string> = {
+  gerar_carrossel: "🎨 Desenhando as artes do carrossel…",
+  agendar_post: "🗓️ Preparando o agendamento…",
+  gerar_imagem: "🖼️ Gerando imagem…",
+  gerar_reel: "🎬 Montando o Reel…",
+};
 
 const STATE_LABEL = { idle: "Online", listening: "Ouvindo…", thinking: "Processando…", speaking: "Falando…" } as const;
 
@@ -90,7 +98,23 @@ export function JarvisChat({ variant = "compact" }: { variant?: "compact" | "ful
               )}
             >
               {m.role === "assistant" ? (
-                m.content ? <Markdown>{m.content}</Markdown> : <span className="animate-pulse text-primary">▍</span>
+                <>
+                  {m.content ? <Markdown>{m.content}</Markdown> : !m.media && !m.working && <span className="animate-pulse text-primary">▍</span>}
+                  {m.working && (
+                    <p className="mt-1 animate-pulse text-xs text-primary">
+                      {TOOL_LABEL[m.working] ?? "Trabalhando…"}
+                    </p>
+                  )}
+                  {m.media?.map((md) => <MediaPreview key={md.generationId} media={md} />)}
+                  {m.proposal?.map((p, k) => (
+                    <ProposalCard
+                      key={k}
+                      p={p}
+                      done={m.proposalDone?.[k]}
+                      onDone={(status, note) => j.annotate(i, note, { proposalDone: { ...m.proposalDone, [k]: status } })}
+                    />
+                  ))}
+                </>
               ) : (
                 m.content
               )}

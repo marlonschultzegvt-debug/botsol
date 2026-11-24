@@ -3,6 +3,7 @@
  * Body: ContentBrief. Resposta: text/plain em stream. Header X-Generation-Id
  * não é possível (o id nasce no fim), então o front busca o histórico depois.
  */
+import { claudeCostUsd } from "@/lib/ai/pricing";
 import { z } from "zod";
 import { streamText } from "@/lib/ai/claude";
 import { buildContentPrompt, CONTENT_SYSTEM, CONTENT_TYPES, type ContentType } from "@/lib/ai/prompts/content";
@@ -61,6 +62,7 @@ export async function POST(req: Request) {
         data: {
           agencyId: user.agencyId, userId: user.id, clientId: client?.id, type: TYPE_TO_DB[brief.type],
           input: brief, output: r.text, model: r.model, inputTokens: r.inputTokens, outputTokens: r.outputTokens,
+            provider: "claude", costUsd: claudeCostUsd(r.model, r.inputTokens, r.outputTokens),
         },
       });
     },

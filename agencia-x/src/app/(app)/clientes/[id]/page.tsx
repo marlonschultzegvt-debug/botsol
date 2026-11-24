@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { ClientForm } from "@/components/clients/client-form";
 import {
-  DeleteClientButton, DeleteNoteButton, InvoiceForm, InvoiceStatusSelect, NoteForm, PortalAccess, InstagramCard,
+  DeleteClientButton, DeleteNoteButton, InvoiceForm, InvoiceStatusSelect, NoteForm, PortalAccess, InstagramCard, BrandCard,
 } from "@/components/clients/client-widgets";
 import { CLIENT_STATUS, CONTENT_STATUS, NOTE_TYPE, PAYMENT_STATUS } from "@/components/clients/status";
 import { can, requireUser } from "@/lib/session";
@@ -202,6 +202,23 @@ export default async function ClientPage({
               </ol>
             </CardContent>
           </Card>
+
+          {canEdit && (
+            <Card id="identidade-visual">
+              <CardHeader><CardTitle>Identidade visual</CardTitle></CardHeader>
+              <CardContent>
+                <BrandCard
+                  clientId={c.id}
+                  name={c.name}
+                  handle={c.instagram}
+                  initial={{
+                    primary: c.brandPrimary ?? "#0B1220", accent: c.brandAccent ?? "#19D3F0", bg: c.brandBg ?? "#F6F4EF",
+                    text: c.brandText ?? "#FFFFFF", font: c.brandFont ?? "montserrat", logoUrl: c.logoAssetId ? `/api/assets/${c.logoAssetId}` : null,
+                  }}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {canEdit && (
             <Card id="conta-instagram">

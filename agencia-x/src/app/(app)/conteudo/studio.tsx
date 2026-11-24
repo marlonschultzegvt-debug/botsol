@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Clapperboard, Copy, GalleryHorizontal, History, Loader2, MessageSquareText, Sparkles, Square, Zap, CalendarPlus } from "lucide-react";
+import { Check, Clapperboard, Copy, GalleryHorizontal, History, Loader2, MessageSquareText, Sparkles, Square, Zap, CalendarPlus, Images } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import type { ClientOption } from "@/server/queries";
 import { saveGenerationToCalendarAction } from "@/server/actions/content";
 import { readTextStream } from "@/lib/read-stream";
 import { cn } from "@/lib/utils";
+import { ArtPanel, GeneratedGallery, type GalleryItem } from "@/components/media/art-panel";
 
 const TYPES: { id: ContentType; label: string; icon: typeof Sparkles; desc: string }[] = [
   { id: "reels", label: "Roteiro Reels", icon: Clapperboard, desc: "Reels, TikTok, Shorts" },
@@ -37,7 +38,7 @@ const todayIso = () => new Date(Date.now() + 864e5).toISOString().slice(0, 10);
 const nicheFor = (niche: string) =>
   NICHE_TEMPLATES.find((n) => n.niche.toLowerCase().includes(niche.toLowerCase().split(" ")[0]))?.id ?? "";
 
-export function ContentStudio({ clients, history }: { clients: ClientOption[]; history: HistoryItem[] }) {
+export function ContentStudio({ clients, history, gallery = [] }: { clients: ClientOption[]; history: HistoryItem[]; gallery?: GalleryItem[] }) {
   const router = useRouter();
   const [type, setType] = useState<ContentType>("reels");
   const [clientId, setClientId] = useState("");
@@ -64,6 +65,7 @@ export function ContentStudio({ clients, history }: { clients: ClientOption[]; h
   const [calDate, setCalDate] = useState(todayIso());
   const [calMsg, setCalMsg] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
+  const [artOpen, setArtOpen] = useState(false);
 
   useEffect(() => {
     // Ideia vinda do Espião: /conteudo?topic=...&client=...
@@ -248,7 +250,12 @@ export function ContentStudio({ clients, history }: { clients: ClientOption[]; h
                 {loading && <Loader2 className="h-4 w-4 animate-spin text-primary" />} Resultado
               </CardTitle>
               {output && !loading && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
+                  {type === "carrossel" && (
+                    <Button size="sm" onClick={() => setArtOpen((v) => !v)}>
+                      <Images /> Criar artes
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => { setCalClient(clientId); setCalOpen((v) => !v); }}>
                     <CalendarPlus /> Calendário
                   </Button>
@@ -277,6 +284,9 @@ export function ContentStudio({ clients, history }: { clients: ClientOption[]; h
                   </Button>
                 </div>
               )}
+              {artOpen && type === "carrossel" && output && !loading && (
+                <ArtPanel clients={clients} clientId={clientId} text={output} title={topic} />
+              )}
               {calMsg && <p className={cn("mb-3 text-sm", calMsg.startsWith("✓") ? "text-success" : "text-danger")}>{calMsg}</p>}
               {output ? (
                 <Markdown>{output}</Markdown>
@@ -290,6 +300,13 @@ export function ContentStudio({ clients, history }: { clients: ClientOption[]; h
               )}
             </CardContent>
           </Card>
+
+          {gallery.length > 0 && (
+            <Card>
+              <CardHeader><CardTitle className="flex items-center gap-2"><Images className="h-4 w-4" /> Artes geradas</CardTitle></CardHeader>
+              <CardContent><GeneratedGallery items={gallery} /></CardContent>
+            </Card>
+          )}
 
           {history.length > 0 && (
             <Card>

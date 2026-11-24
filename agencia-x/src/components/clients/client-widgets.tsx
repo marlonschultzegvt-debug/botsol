@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { SubmitButton } from "@/components/ui/submit-button";
 import {
-  addInvoiceAction, addNoteAction, deleteClientAction, deleteNoteAction, setInvoiceStatusAction,
+  addInvoiceAction, addNoteAction, deleteClientAction, deleteNoteAction, setInvoiceStatusAction, updateBrandAction,
 } from "@/server/actions/clients";
 import { createPortalAccessAction, revokePortalAccessAction } from "@/server/actions/ops";
 import { disconnectInstagramAction, setAutoPublishAction } from "@/server/actions/instagram";
@@ -220,5 +220,93 @@ export function InstagramCard({
         </>
       )}
     </div>
+  );
+}
+
+
+// ─────────────────────────── Identidade visual ───────────────────────────
+const FONTS = [
+  ["montserrat", "Montserrat (moderna)"],
+  ["poppins", "Poppins (amigável)"],
+  ["playfair", "Playfair (elegante, serifada)"],
+  ["spacegrotesk", "Space Grotesk (tech)"],
+] as const;
+const FONT_CSS: Record<string, string> = {
+  montserrat: "Montserrat, system-ui, sans-serif", poppins: "Poppins, system-ui, sans-serif",
+  playfair: "'Playfair Display', Georgia, serif", spacegrotesk: "'Space Grotesk', system-ui, sans-serif",
+};
+
+export type BrandValues = { primary: string; accent: string; bg: string; text: string; font: string; logoUrl: string | null };
+
+/** Cores, fonte e logo do cliente: aplicadas automaticamente nos carrosséis gerados. */
+export function BrandCard({ clientId, name, handle, initial }: { clientId: string; name: string; handle: string | null; initial: BrandValues }) {
+  const [state, action, pending] = useActionState(updateBrandAction.bind(null, clientId), undefined);
+  const [, startSubmit] = useTransition();
+  const [v, setV] = useState(initial);
+  const [logoPreview, setLogoPreview] = useState<string | null>(initial.logoUrl);
+  const [removeLogo, setRemoveLogo] = useState(false);
+  const set = (k: keyof BrandValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setV({ ...v, [k]: e.target.value });
+
+  const colors: [keyof BrandValues, string, string][] = [
+    ["primary", "brandPrimary", "Principal"], ["accent", "brandAccent", "Destaque"], ["bg", "brandBg", "Fundo claro"], ["text", "brandText", "Texto"],
+  ];
+  return (
+    // onSubmit manual: com action={} o React limpa o formulário e a fonte escolhida "voltava" na tela.
+    <form
+      onSubmit={(e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); startSubmit(() => action(fd)); }}
+      className="space-y-3"
+    >
+      {/* prévia rápida (estilo "impacto") */}
+      <div className="relative flex aspect-[4/5] w-full max-w-[220px] flex-col justify-between overflow-hidden rounded-md p-4"
+        style={{ background: v.primary, color: v.text, fontFamily: FONT_CSS[v.font] }} aria-label="Prévia da arte">
+        <span className="absolute left-0 top-0 h-full w-1.5" style={{ background: v.accent }} />
+        <span className="text-[9px] opacity-80">{handle ?? name}</span>
+        <div>
+          <p className="text-lg font-extrabold leading-tight">Seu título de impacto aqui</p>
+          <span className="mt-2 block h-1.5 w-10 rounded" style={{ background: v.accent }} />
+        </div>
+        <div className="flex items-center justify-between text-[9px]">
+          {logoPreview && !removeLogo ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoPreview} alt="Logo" className="h-5 w-auto max-w-[90px] object-contain" />
+          ) : <b>{name}</b>}
+          <span style={{ color: v.accent }}>Arraste →</span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {colors.map(([k, field, label]) => (
+          <label key={field} className="flex items-center gap-2 rounded border border-border px-2 py-1.5 text-xs">
+            <input type="color" name={field} value={v[k] as string} onChange={set(k)} className="h-7 w-8 cursor-pointer rounded border-0 bg-transparent p-0" />
+            <span className="min-w-0">
+              <span className="block text-muted-foreground">{label}</span>
+              <span className="font-mono">{(v[k] as string).toUpperCase()}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <div>
+        <Label htmlFor="brandFont">Fonte</Label>
+        <Select id="brandFont" name="brandFont" value={v.font} onChange={set("font")}>
+          {FONTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+        </Select>
+      </div>
+      <div>
+        <Label htmlFor="logo">Logo (PNG com fundo transparente é o ideal)</Label>
+        <input id="logo" name="logo" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) { setLogoPreview(URL.createObjectURL(f)); setRemoveLogo(false); } }}
+          className="mt-1 block w-full text-xs file:mr-2 file:rounded file:border-0 file:bg-primary/15 file:px-2 file:py-1 file:text-primary" />
+        {initial.logoUrl && (
+          <label className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" name="removeLogo" value="1" checked={removeLogo} onChange={(e) => setRemoveLogo(e.target.checked)} /> Remover logo
+          </label>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button type="submit" size="sm" disabled={pending}>{pending ? "Salvando…" : "Salvar identidade"}</Button>
+        {state?.ok && <span className="text-xs text-success">Salvo ✓</span>}
+        {state?.error && <span className="text-xs text-danger">{state.error}</span>}
+      </div>
+    </form>
   );
 }

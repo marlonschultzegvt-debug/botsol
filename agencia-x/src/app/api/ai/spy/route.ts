@@ -4,6 +4,7 @@
  * 2) Claude devolve relatório JSON (SPY_REPORT_SCHEMA).
  * 3) Salva Competitor + CompetitorSnapshot (histórico) + AiGeneration (créditos).
  */
+import { claudeCostUsd } from "@/lib/ai/pricing";
 import { z } from "zod";
 import { friendlyError, generateJson } from "@/lib/ai/claude";
 import { buildSpyPrompt, SPY_REPORT_SCHEMA, SPY_SYSTEM, type SpyReport } from "@/lib/ai/prompts/spy";
@@ -76,6 +77,7 @@ export async function POST(req: Request) {
         agencyId: user.agencyId, userId: user.id, clientId: client?.id, type: "COMPETITOR_REPORT",
         input: { ...input, handle }, output: JSON.stringify(r.data), model: r.model,
         inputTokens: r.inputTokens, outputTokens: r.outputTokens,
+        provider: "claude", costUsd: claudeCostUsd(r.model, r.inputTokens, r.outputTokens),
       },
     });
 

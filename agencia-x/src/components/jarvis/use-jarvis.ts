@@ -1,9 +1,21 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readTextStream } from "@/lib/read-stream";
 import type { OrbState } from "./jarvis-orb";
+import type { JarvisEvent, Proposal } from "@/lib/ai/jarvis-tools";
+import type { MediaResult } from "@/server/media";
 
-export type ChatMsg = { role: "user" | "assistant"; content: string };
+export type ChatMsg = {
+  role: "user" | "assistant";
+  content: string;
+  /** Registro interno enviado ao modelo (ex.: geracao_id), não aparece na tela. */
+  note?: string;
+  media?: MediaResult[];
+  proposal?: Proposal[];
+  /** Resultado de cada cartão de agendamento (por índice), depois do toque do usuário. */
+  proposalDone?: Record<number, string>;
+  /** Ferramenta em execução ("gerar_carrossel"…), para mostrar "Desenhando as artes…". */
+  working?: string | null;
+};
 
 // Tipos mínimos da Web Speech API (não vêm no lib.dom do TS).
 type SpeechResultList = ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }>;
@@ -135,18 +147,55 @@ export function useJarvis(opts: { onWake?: () => void } = {}) {
         const res = await fetch("/api/jarvis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: history.slice(-30) }),
+          body: JSON.stringify({
+            messages: history.slice(-30).map(({ role, content, note }) => ({ role, content: content || "(mídia)", note })),
+          }),
           signal: abortRef.current.signal,
         });
-        const full = await readTextStream(res, (t) =>
-          setMessages((m) => [...m.slice(0, -1), { role: "assistant", content: t }]),
-        );
+        if (!res.ok || !res.body) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error((data as { error?: string }).error ?? `Erro ${res.status}`);
+        }
+        // NDJSON: um evento por linha.
+        let cur: ChatMsg = { role: "assistant", content: "" };
+        const update = (patch: Partial<ChatMsg>) => {
+          cur = { ...cur, ...patch };
+          const snap = cur;
+          setMessages((m) => [...m.slice(0, -1), snap]);
+        };
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const line = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!line) continue;
+            let ev: JarvisEvent;
+            try { ev = JSON.parse(line) as JarvisEvent; } catch { continue; }
+            if (ev.t === "text") update({ content: cur.content + ev.d });
+            else if (ev.t === "tool") update({ working: ev.state === "start" ? ev.name : null });
+            else if (ev.t === "media")
+              update({
+                media: [...(cur.media ?? []), ev.media],
+                note: [cur.note, `mídia gerada: ${ev.media.kind} de ${ev.media.clientName}, geracao_id=${ev.media.generationId}, ${ev.media.assets.length} artes`].filter(Boolean).join("; "),
+              });
+            else if (ev.t === "confirm") update({ proposal: [...(cur.proposal ?? []), ev.proposal] });
+            else if (ev.t === "error") setError(ev.msg);
+          }
+        }
+        update({ content: cur.content.trim(), working: null });
+        const full = cur.content;
         setState("idle");
         speak(full);
       } catch (e) {
         if ((e as Error).name === "AbortError") return setState("idle");
         setError((e as Error).message);
-        setMessages(history); // remove a bolha vazia
+        setMessages((m) => (m.at(-1)?.content || m.at(-1)?.media ? m : history)); // remove a bolha vazia
         setState("idle");
       }
     },
@@ -259,8 +308,13 @@ export function useJarvis(opts: { onWake?: () => void } = {}) {
 
   const reset = () => { stop(); setMessages([]); setError(null); };
 
+  /** Anota algo numa mensagem (ex.: cartão de agendamento confirmado) e avisa o modelo pela nota. */
+  const annotate = useCallback((index: number, note: string, patch: Partial<ChatMsg> = {}) => {
+    setMessages((m) => m.map((msg, i) => (i === index ? { ...msg, ...patch, note: [msg.note, note].filter(Boolean).join("; ") } : msg)));
+  }, []);
+
   return {
-    messages, state, error, voiceOn, toggleVoice, send, listen, stop, reset,
+    annotate, messages, state, error, voiceOn, toggleVoice, send, listen, stop, reset,
     handsFree, toggleHandsFree, armed,
   };
 }

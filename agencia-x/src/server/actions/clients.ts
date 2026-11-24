@@ -131,3 +131,43 @@ export async function setInvoiceStatusAction(invoiceId: string, status: InvoiceS
   revalidatePath("/campanhas");
   revalidatePath("/dashboard");
 }
+
+// ─────────────────────────── Identidade visual ───────────────────────────
+const color = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, "Cor inválida (use #RRGGBB)");
+const BrandSchema = z.object({
+  brandPrimary: color,
+  brandAccent: color,
+  brandBg: color,
+  brandText: color,
+  brandFont: z.enum(["montserrat", "poppins", "playfair", "spacegrotesk"]),
+});
+
+/** Salva cores, fonte e (opcional) logo do cliente — usados nas artes geradas. */
+export async function updateBrandAction(clientId: string, _: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  assertCan(user, "clients:write");
+  const parsed = BrandSchema.safeParse(Object.fromEntries(["brandPrimary", "brandAccent", "brandBg", "brandText", "brandFont"].map((k) => [k, String(form.get(k) ?? "")])));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const client = await db.client.findFirst({ where: { id: clientId, agencyId: user.agencyId }, select: { id: true, logoAssetId: true } });
+  if (!client) return { error: "Cliente não encontrado." };
+
+  let logoAssetId: string | null | undefined;
+  const logo = form.get("logo");
+  if (form.get("removeLogo") === "1") logoAssetId = null;
+  if (logo instanceof File && logo.size > 0) {
+    if (!/^image\/(png|jpeg|webp|svg\+xml)$/.test(logo.type)) return { error: "Logo deve ser PNG, JPG, WEBP ou SVG." };
+    if (logo.size > 3 * 1024 * 1024) return { error: "Logo maior que 3 MB." };
+    const { putObject, safeName } = await import("@/lib/storage");
+    const { randomUUID } = await import("node:crypto");
+    const key = `${user.agencyId}/${clientId}/marca/${randomUUID().slice(0, 8)}-${safeName(logo.name)}`;
+    await putObject(key, Buffer.from(await logo.arrayBuffer()), logo.type);
+    const a = await db.asset.create({
+      data: { clientId, uploadedById: user.id, fileName: logo.name.slice(0, 200), mimeType: logo.type, sizeBytes: logo.size, storageKey: key, kind: "logo" },
+    });
+    logoAssetId = a.id;
+  }
+
+  await db.client.update({ where: { id: clientId }, data: { ...parsed.data, ...(logoAssetId !== undefined ? { logoAssetId } : {}) } });
+  revalidatePath(`/clientes/${clientId}`);
+  return { ok: true };
+}

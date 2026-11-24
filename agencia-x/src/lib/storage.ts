@@ -74,6 +74,16 @@ export async function publicTempUrl(key: string, seconds = 3600): Promise<string
   return `${SB_URL}/storage/v1${signedURL}`;
 }
 
+/** Lê o conteúdo do arquivo (Supabase ou pasta local). Usado para montar ZIP e embutir logo nas artes. */
+export async function getObjectBytes(key: string): Promise<Buffer> {
+  if (storageMode() === "supabase") {
+    const res = await fetch(`${SB_URL}/storage/v1/object/${BUCKET}/${key}`, { headers: sbHeaders(), cache: "no-store" });
+    if (!res.ok) throw new Error(`Supabase Storage respondeu ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  }
+  return readLocal(key);
+}
+
 export async function readLocal(key: string) {
   const file = path.join(LOCAL_DIR, key);
   if (!file.startsWith(LOCAL_DIR + path.sep)) throw new Error("Caminho inválido");

@@ -111,6 +111,13 @@ model Client {
   brandVoice   String? // tom de voz -> usado nos prompts da IA
   targetAudience String?
   avgTicket    Decimal?     @db.Decimal(10, 2) // ticket médio do cliente final
+  // Identidade visual (usada nas artes geradas: carrossel, imagens, reels)
+  brandPrimary String? // cor principal, ex.: #0F172A
+  brandAccent  String? // cor de destaque
+  brandBg      String? // fundo
+  brandText    String? // cor do texto
+  brandFont    String? // montserrat | poppins | playfair | spacegrotesk
+  logoAssetId  String?
   monthlyFee   Decimal?     @db.Decimal(10, 2) // quanto paga à agência
   status       ClientStatus @default(ACTIVE)
   startedAt    DateTime     @default(now())
@@ -332,6 +339,7 @@ model Asset {
   mimeType       String
   sizeBytes      Int
   storageKey     String
+  kind           String   @default("upload") // upload | generated | logo
   createdAt      DateTime @default(now())
 
   client       Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -349,6 +357,10 @@ enum GenerationType {
   BATCH
   COMPETITOR_REPORT
   BRIEFING
+  CAROUSEL_ART // artes do carrossel renderizadas
+  IMAGE // imagem gerada por IA
+  REEL // vídeo montado
+  JARVIS // conversa com ferramentas
 }
 
 /// Histórico de TUDO que a IA gerou (auditoria, reuso e controle de créditos).
@@ -363,6 +375,9 @@ model AiGeneration {
   model        String
   inputTokens  Int?
   outputTokens Int?
+  costUsd      Decimal?       @db.Decimal(10, 4) // custo estimado da geração (IA + serviços)
+  provider     String? // claude, openai, elevenlabs...
+  assetIds     String[] // arquivos gerados (imagens/vídeo)
   favorite     Boolean        @default(false)
   templateId   String?
   createdAt    DateTime       @default(now())
